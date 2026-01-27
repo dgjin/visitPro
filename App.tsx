@@ -1,0 +1,304 @@
+import React, { useState } from 'react';
+import { LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Menu, X, Sparkles, Shield, User as UserIcon } from 'lucide-react';
+import Dashboard from './components/Dashboard';
+import ClientManager from './components/ClientManager';
+import VisitManager from './components/VisitManager';
+import AdminPanel from './components/AdminPanel';
+import { Client, Visit, ViewState, User, CustomFieldDefinition } from './types';
+
+// Mock Data
+const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
+  { id: 'f1', target: 'Client', label: '职位', type: 'text' },
+  { id: 'f2', target: 'Client', label: '首选语言', type: 'text' },
+  { id: 'f3', target: 'Client', label: '预算范围', type: 'text' },
+  { id: 'f4', target: 'Visit', label: '拜访时长 (分钟)', type: 'number' },
+  { id: 'f5', target: 'Visit', label: '参与人数', type: 'number' },
+  { id: 'f6', target: 'User', label: '员工编号', type: 'text' },
+];
+
+const MOCK_USERS: User[] = [
+  { 
+    id: 'u1', 
+    name: 'John Doe', 
+    email: 'john@example.com', 
+    phone: '138-0013-8001',
+    department: '销售部',
+    teamName: '华东大区一组',
+    role: 'Admin', 
+    avatarUrl: 'https://picsum.photos/seed/u1/200',
+    customFields: [
+      { fieldId: 'f6', value: 'EMP001' }
+    ]
+  },
+  { 
+    id: 'u2', 
+    name: 'Jane Smith', 
+    email: 'jane@example.com', 
+    phone: '139-1122-3344',
+    department: '市场部',
+    teamName: '内容运营组',
+    role: 'User', 
+    avatarUrl: 'https://picsum.photos/seed/u2/200',
+    customFields: [
+      { fieldId: 'f6', value: 'EMP002' }
+    ]
+  },
+];
+
+const MOCK_CLIENTS: Client[] = [
+  { 
+    id: '1', 
+    name: '艾丽斯·弗里曼', 
+    company: '泰克诺瓦 (TechNova)', 
+    email: 'alice@technova.com', 
+    phone: '555-0123', 
+    address: '科技大道 123 号', 
+    avatarUrl: 'https://picsum.photos/seed/alice/200', 
+    industry: 'SaaS', 
+    status: 'Active',
+    customFields: [
+      { fieldId: 'f1', value: 'CTO' },
+      { fieldId: 'f2', value: '英语' }
+    ]
+  },
+  { 
+    id: '2', 
+    name: '鲍勃·史密斯', 
+    company: '必筑公司 (BuildCo)', 
+    email: 'bob@buildco.com', 
+    phone: '555-0199', 
+    address: '建设路 456 号', 
+    avatarUrl: 'https://picsum.photos/seed/bob/200', 
+    industry: 'Construction', 
+    status: 'Lead',
+    customFields: [
+      { fieldId: 'f3', value: '50万-100万' }
+    ]
+  },
+];
+
+const MOCK_VISITS: Visit[] = [
+  { id: '101', userId: 'u1', clientId: '1', clientName: '艾丽斯·弗里曼', date: new Date(Date.now() - 86400000 * 2).toISOString(), summary: '讨论了第三季度的路线图。客户对目前的进展感到满意，但要求增加一项新的报告功能。', rawNotes: '讨论Q3路线图。客户想要新报表功能。整体满意。', outcome: 'Positive', actionItems: ['发送 API 文档', '安排技术评审'], sentimentScore: 85, customFields: [{ fieldId: 'f4', value: '60' }, { fieldId: 'f5', value: '3' }], followUpEmailDraft: 'Subject: Q3 Roadmap...' },
+  { id: '102', userId: 'u2', clientId: '2', clientName: '鲍勃·史密斯', date: new Date(Date.now() - 86400000 * 5).toISOString(), summary: '初步需求会议。客户预算低于预期。需要调整提案。', rawNotes: '预算太低。需调整。', outcome: 'Neutral', actionItems: ['修改报价', '邮件跟进'], sentimentScore: 50, followUpEmailDraft: 'Subject: Revised Proposal...' },
+];
+
+const App: React.FC = () => {
+  const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User>(MOCK_USERS[0]);
+  const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
+  
+  // Data State
+  const [users, setUsers] = useState<User[]>(MOCK_USERS);
+  const [clients, setClients] = useState<Client[]>(MOCK_CLIENTS);
+  const [visits, setVisits] = useState<Visit[]>(MOCK_VISITS);
+  const [fieldDefinitions, setFieldDefinitions] = useState<CustomFieldDefinition[]>(MOCK_FIELD_DEFINITIONS);
+
+  // Client Actions
+  const handleAddClient = (newClient: Client) => {
+    setClients(prev => [...prev, newClient]);
+  };
+  const handleUpdateClient = (updatedClient: Client) => {
+    setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+  };
+  const handleDeleteClient = (clientId: string) => {
+    if (confirm('确定要删除此客户吗？相关的拜访记录可能也会受到影响。')) {
+      setClients(prev => prev.filter(c => c.id !== clientId));
+    }
+  };
+
+  // Visit Actions
+  const handleAddVisit = (newVisit: Visit) => {
+    setVisits(prev => [newVisit, ...prev]);
+  };
+  const handleUpdateVisit = (updatedVisit: Visit) => {
+    setVisits(prev => prev.map(v => v.id === updatedVisit.id ? updatedVisit : v));
+  };
+  const handleDeleteVisit = (visitId: string) => {
+    if (confirm('确定要删除这条拜访记录吗？')) {
+      setVisits(prev => prev.filter(v => v.id !== visitId));
+    }
+  };
+
+  const handleVisitClick = (visitId: string) => {
+    setSelectedVisitId(visitId);
+    setView(ViewState.VISITS);
+  };
+
+  // User/Admin Actions
+  const handleAddUser = (user: User) => setUsers(prev => [...prev, user]);
+  const handleUpdateUser = (updatedUser: User) => {
+      setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+      if (currentUser.id === updatedUser.id) setCurrentUser(updatedUser);
+  };
+  const handleDeleteUser = (id: string) => {
+    if (confirm('确定要删除此用户吗？')) {
+      setUsers(prev => prev.filter(u => u.id !== id));
+    }
+  };
+  const handleUpdateUserRole = (id: string, role: 'Admin' | 'User') => {
+    setUsers(prev => prev.map(u => u.id === id ? { ...u, role } : u));
+    if (currentUser.id === id) setCurrentUser(prev => ({ ...prev, role }));
+  };
+
+  const handleAddField = (field: CustomFieldDefinition) => setFieldDefinitions(prev => [...prev, field]);
+  const handleDeleteField = (id: string) => setFieldDefinitions(prev => prev.filter(f => f.id !== id));
+
+  const NavItem = ({ viewTarget, label, icon: Icon }: { viewTarget: ViewState, label: string, icon: any }) => (
+    <button
+      onClick={() => {
+        setView(viewTarget);
+        setIsMobileMenuOpen(false);
+      }}
+      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 
+        ${view === viewTarget 
+          ? 'bg-blue-600 text-white shadow-md' 
+          : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+    >
+      <Icon className="w-5 h-5" />
+      <span className="font-medium">{label}</span>
+    </button>
+  );
+
+  return (
+      <div className="flex h-screen bg-gray-50 overflow-hidden">
+        
+        {/* Sidebar */}
+        <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 text-white transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+          <div className="h-full flex flex-col">
+            <div className="p-6 flex items-center space-x-3 border-b border-gray-800">
+              <div className="bg-gradient-to-tr from-blue-500 to-purple-600 p-2 rounded-lg">
+                <Sparkles className="w-6 h-6 text-white" />
+              </div>
+              <h1 className="text-xl font-bold tracking-tight">VisitPro</h1>
+            </div>
+
+            <nav className="flex-1 px-4 py-6 space-y-2">
+              <NavItem viewTarget={ViewState.DASHBOARD} label="仪表盘" icon={LayoutDashboard} />
+              <NavItem viewTarget={ViewState.CLIENTS} label="客户列表" icon={Users} />
+              <NavItem viewTarget={ViewState.VISITS} label="拜访记录" icon={CalendarCheck} />
+              
+              {currentUser.role === 'Admin' && (
+                 <div className="pt-4 mt-4 border-t border-gray-800">
+                    <p className="px-4 text-xs font-semibold text-gray-500 uppercase mb-2">管理员</p>
+                    <NavItem viewTarget={ViewState.ADMIN} label="系统管理" icon={Shield} />
+                 </div>
+              )}
+            </nav>
+
+            <div className="p-4 border-t border-gray-800 mt-auto">
+               <button className="w-full flex items-center space-x-3 px-4 py-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+                  <Settings className="w-5 h-5" />
+                  <span>设置</span>
+               </button>
+               <div className="mt-4 flex items-center space-x-3 px-4 relative group cursor-pointer">
+                  <img src={currentUser.avatarUrl} alt="Profile" className="w-8 h-8 rounded-full bg-gray-700" />
+                  <div className="text-sm">
+                    <p className="text-white font-medium">{currentUser.name}</p>
+                    <p className="text-gray-500 text-xs">{currentUser.role === 'Admin' ? '系统管理员' : '销售代表'}</p>
+                  </div>
+                  
+                  <div className="absolute bottom-full left-0 w-full mb-2 bg-white rounded-lg shadow-lg p-2 hidden group-hover:block text-gray-800 z-50">
+                      <p className="text-xs text-gray-500 mb-1 px-2">切换用户 (Demo)</p>
+                      {MOCK_USERS.map(u => (
+                          <button 
+                            key={u.id}
+                            onClick={() => setCurrentUser(u)}
+                            className={`w-full text-left px-2 py-1 text-sm rounded hover:bg-gray-100 ${currentUser.id === u.id ? 'font-bold text-blue-600' : ''}`}
+                          >
+                              {u.name} ({u.role})
+                          </button>
+                      ))}
+                  </div>
+               </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* Mobile Overlay */}
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />
+        )}
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col h-full overflow-hidden">
+          {/* Header */}
+          <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-6 lg:px-8">
+            <div className="flex items-center lg:hidden">
+              <button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-500 hover:text-gray-700">
+                <Menu className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="hidden lg:flex items-center text-gray-800 font-semibold text-lg">
+              {view === ViewState.DASHBOARD && '仪表盘概览'}
+              {view === ViewState.CLIENTS && '客户目录'}
+              {view === ViewState.VISITS && '拜访管理'}
+              {view === ViewState.ADMIN && '系统管理面板'}
+            </div>
+
+            <div className="flex items-center space-x-4">
+               {view === ViewState.ADMIN && (
+                   <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full font-medium">管理员模式</span>
+               )}
+            </div>
+          </header>
+
+          <main className="flex-1 overflow-y-auto p-4 lg:p-8">
+            <div className="max-w-7xl mx-auto h-full">
+              {view === ViewState.DASHBOARD && (
+                  <Dashboard 
+                    visits={visits} 
+                    users={users}
+                    totalClients={clients.length} 
+                    onVisitClick={handleVisitClick}
+                  />
+              )}
+              {view === ViewState.CLIENTS && (
+                  <ClientManager 
+                    clients={clients} 
+                    onAddClient={handleAddClient} 
+                    onUpdateClient={handleUpdateClient}
+                    onDeleteClient={handleDeleteClient}
+                    fieldDefinitions={fieldDefinitions} 
+                  />
+              )}
+              {view === ViewState.VISITS && (
+                  <VisitManager 
+                    clients={clients} 
+                    visits={visits} 
+                    onAddVisit={handleAddVisit} 
+                    onUpdateVisit={handleUpdateVisit}
+                    onDeleteVisit={handleDeleteVisit}
+                    fieldDefinitions={fieldDefinitions}
+                    initialEditingVisitId={selectedVisitId}
+                    onClearInitialEditingVisitId={() => setSelectedVisitId(null)}
+                    currentUserId={currentUser.id}
+                  />
+              )}
+              {view === ViewState.ADMIN && currentUser.role === 'Admin' && (
+                  <AdminPanel 
+                    users={users}
+                    onAddUser={handleAddUser}
+                    onUpdateUser={handleUpdateUser}
+                    onDeleteUser={handleDeleteUser}
+                    onUpdateUserRole={handleUpdateUserRole}
+                    fieldDefinitions={fieldDefinitions}
+                    onAddField={handleAddField}
+                    onDeleteField={handleDeleteField}
+                  />
+              )}
+              {view === ViewState.ADMIN && currentUser.role !== 'Admin' && (
+                  <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                      <Shield className="w-16 h-16 mb-4 text-gray-300" />
+                      <p className="text-lg">您没有权限访问此页面。</p>
+                  </div>
+              )}
+            </div>
+          </main>
+        </div>
+      </div>
+  );
+};
+
+export default App;

@@ -1,0 +1,7 @@
+{
+  "name": "VisitPro - 智能客户拜访管理",
+  "description": "由 Gemini AI 赋能的综合客户拜访管理解决方案。追踪客户互动，管理日程，即时生成智能拜访摘要和跟进邮件。",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
