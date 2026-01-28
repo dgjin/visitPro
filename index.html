@@ -6,27 +6,27 @@
     <title>VisitPro - 客户拜访管理</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-      body {
-        font-family: 'Inter', sans-serif;
-        background-color: #f3f4f6;
+    <script>
+      // 垫片：防止在某些本地开发环境下由于缺少 process 对象导致的崩溃
+      window.process = window.process || { env: { API_KEY: "" } };
+    </script>
+    <script type="importmap">
+    {
+      "imports": {
+        "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
+        "react/": "https://esm.sh/react@^19.2.4/",
+        "react": "https://esm.sh/react@^19.2.4",
+        "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+        "recharts": "https://esm.sh/recharts@^3.7.0",
+        "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+        "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
       }
-    </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "react": "https://esm.sh/react@^19.2.4",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "recharts": "https://esm.sh/recharts@^3.7.0",
-    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
-    "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
-  }
-}
-</script>
-</head>
+    }
+    </script>
+  </head>
   <body>
     <div id="root"></div>
+    <!-- 核心入口：没有这个标签，应用将无法启动 -->
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>

@@ -1,11 +1,9 @@
-
-// @google/genai Coding Guidelines followed
 import { GoogleGenAI, Type } from "@google/genai";
+import { AIAnalysisResult } from "../types";
 
 // Always use named parameter for apiKey and use process.env.API_KEY directly.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Using object literal for schema as per recommended practices.
 const analysisSchema = {
   type: Type.OBJECT,
   properties: {
@@ -35,11 +33,31 @@ const analysisSchema = {
   required: ["summary", "sentiment", "actionItems", "followUpEmailDraft"],
 };
 
+// Helper to clean JSON string from Markdown code blocks often returned by LLMs
+const cleanJsonString = (text: string) => {
+  if (!text) return "{}";
+  
+  // Try to find JSON object brackets
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return text.substring(firstBrace, lastBrace + 1);
+  }
+  
+  // Fallback: simple markdown stripping
+  let clean = text.trim();
+  if (clean.startsWith("```")) {
+    clean = clean.replace(/^```[a-z]*\n?/, "");
+    clean = clean.replace(/\n?```$/, "");
+  }
+  return clean;
+};
+
 export const analyzeVisitNotes = async (
   clientName: string,
   rawNotes: string
-) => {
-  // Use process.env.API_KEY directly as it is a hard requirement.
+): Promise<AIAnalysisResult> => {
   if (!process.env.API_KEY) {
     console.warn("API Key is missing. Returning mock data.");
     return {
@@ -64,7 +82,6 @@ export const analyzeVisitNotes = async (
       4. 一份礼貌且相关的跟进邮件草稿，供我发送给客户。
     `;
 
-    // Use ai.models.generateContent with appropriate model for text tasks.
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
@@ -78,7 +95,12 @@ export const analyzeVisitNotes = async (
     const text = response.text;
     if (!text) throw new Error("No response from AI");
     
-    return JSON.parse(text);
+    try {
+        return JSON.parse(cleanJsonString(text)) as AIAnalysisResult;
+    } catch (parseError) {
+        console.error("JSON Parse failed on text:", text);
+        throw new Error("无法解析 AI 返回的 JSON 数据");
+    }
 
   } catch (error) {
     console.error("Error analyzing visit notes:", error);
@@ -90,9 +112,9 @@ export const analyzeVisitAudio = async (
   clientName: string,
   audioBase64: string,
   mimeType: string
-) => {
+): Promise<AIAnalysisResult> => {
   if (!process.env.API_KEY) {
-    console.warn("API Key is missing. Returning mock data.");
+     console.warn("API Key is missing. Returning mock data.");
     return {
       transcription: "模拟语音转写文本...",
       summary: "未检测到 API Key。这是模拟语音摘要。",
@@ -113,9 +135,9 @@ export const analyzeVisitAudio = async (
       5. 起草一份跟进邮件 (followUpEmailDraft)。
     `;
 
-    // Use appropriate native audio model for audio processing.
+    // Use gemini-flash-latest as a stable alias for multimodal tasks like audio processing.
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-native-audio-preview-12-2025",
+      model: "gemini-flash-latest",
       contents: {
         parts: [
           {
@@ -137,7 +159,12 @@ export const analyzeVisitAudio = async (
     const text = response.text;
     if (!text) throw new Error("No response from AI");
     
-    return JSON.parse(text);
+    try {
+        return JSON.parse(cleanJsonString(text)) as AIAnalysisResult;
+    } catch (parseError) {
+        console.error("JSON Parse failed on text:", text);
+        throw new Error("无法解析 AI 返回的 JSON 数据");
+    }
 
   } catch (error) {
     console.error("Error analyzing visit audio:", error);
