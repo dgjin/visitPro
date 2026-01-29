@@ -5,10 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VisitPro - 客户拜访管理</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
       // 垫片：防止在某些本地开发环境下由于缺少 process 对象导致的崩溃
-      window.process = window.process || { env: { API_KEY: "" } };
+      // 请在此处填入您的 API Key 进行测试，或通过构建工具注入
+      window.process = window.process || { 
+        env: { 
+          API_KEY: "",
+          IFLYTEK_APPID: "",
+          IFLYTEK_API_SECRET: "",
+          IFLYTEK_API_KEY: ""
+        } 
+      };
     </script>
     <script type="importmap">
     {

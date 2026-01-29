@@ -1,3 +1,4 @@
+
 export interface CustomFieldData {
   fieldId: string;
   value: string;
@@ -71,4 +72,35 @@ export interface AIAnalysisResult {
   actionItems: string[];
   followUpEmailDraft: string;
   transcription?: string;
+}
+
+export type StorageMode = 'LOCAL_FILE' | 'MYSQL';
+export type AIModelProvider = 'Gemini' | 'DeepSeek';
+
+export interface MySQLConfig {
+  host: string;
+  port: string;
+  username: string;
+  password: string;
+  database: string;
+}
+
+export interface EmailConfig {
+  smtpHost: string;
+  smtpPort: string;
+  senderName: string;
+  senderEmail: string;
+}
+
+export interface AIConfig {
+  activeModel: AIModelProvider;
+  deepSeekApiKey: string;
+}
+
+export interface StorageSettings {
+  mode: StorageMode;
+  mysqlConfig: MySQLConfig;
+  emailConfig: EmailConfig;
+  aiConfig: AIConfig;
+  lastBackupDate?: string;
 }

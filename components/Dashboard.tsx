@@ -18,16 +18,36 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVi
   const positiveVisits = visits.filter(v => v.outcome === 'Positive').length;
   const negativeVisits = visits.filter(v => v.outcome === 'Negative').length;
   
-  // Prepare chart data (Visits per day - Mocking last 7 days distribution)
-  const data = [
-    { name: '周一', visits: 4 },
-    { name: '周二', visits: 3 },
-    { name: '周三', visits: 7 },
-    { name: '周四', visits: 5 },
-    { name: '周五', visits: 6 },
-    { name: '周六', visits: 2 },
-    { name: '周日', visits: 1 },
-  ];
+  // Calculate Visits per day for the current week (Monday to Sunday)
+  const getWeeklyData = () => {
+    const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    const today = new Date();
+    // Adjust to get Monday of the current week
+    // getDay(): 0 is Sunday, 1 is Monday. We want 0 to be Monday for calculation ease.
+    const dayOfWeek = today.getDay(); 
+    const diffToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
+    
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - diffToMon);
+    monday.setHours(0,0,0,0);
+
+    return days.map((name, index) => {
+       const current = new Date(monday);
+       current.setDate(monday.getDate() + index);
+       // Create YYYY-MM-DD string to match the format stored in ISO strings (approximate for local day)
+       // Using ISO slice is safe here because VisitManager saves dates as UTC 00:00 based on date picker
+       const dateStr = current.toISOString().split('T')[0];
+       
+       const count = visits.filter(v => {
+          if (!v.date) return false;
+          return v.date.startsWith(dateStr);
+       }).length;
+
+       return { name, visits: count };
+    });
+  };
+
+  const data = getWeeklyData();
 
   // Compute Team Stats
   const teamStats = users.map(user => {
@@ -104,13 +124,13 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVi
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">每周活动分布</h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">本周活动分布</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                <YAxis axisLine={false} tickLine={false} />
+                <YAxis axisLine={false} tickLine={false} allowDecimals={false} />
                 <Tooltip 
                   cursor={{ fill: 'transparent' }}
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} 

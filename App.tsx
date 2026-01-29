@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Menu, X, Sparkles, Shield, User as UserIcon } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import ClientManager from './components/ClientManager';
 import VisitManager from './components/VisitManager';
 import AdminPanel from './components/AdminPanel';
-import { Client, Visit, ViewState, User, CustomFieldDefinition } from './types';
+import { Client, Visit, ViewState, User, CustomFieldDefinition, StorageSettings } from './types';
 
-// Mock Data
+// Mock Data (Used as fallback if local storage is empty)
 const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
   { id: 'f1', target: 'Client', label: '职位', type: 'text' },
   { id: 'f2', target: 'Client', label: '首选语言', type: 'text' },
@@ -82,17 +83,116 @@ const MOCK_VISITS: Visit[] = [
   { id: '102', userId: 'u2', clientId: '2', clientName: '鲍勃·史密斯', date: new Date(Date.now() - 86400000 * 5).toISOString(), summary: '初步需求会议。客户预算低于预期。需要调整提案。', rawNotes: '预算太低。需调整。', outcome: 'Neutral', actionItems: ['修改报价', '邮件跟进'], sentimentScore: 50, followUpEmailDraft: 'Subject: Revised Proposal...' },
 ];
 
+const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
+  mode: 'LOCAL_FILE',
+  mysqlConfig: { host: '', port: '3306', username: '', password: '', database: '' },
+  emailConfig: { smtpHost: 'smtp.example.com', smtpPort: '587', senderName: 'VisitPro Agent', senderEmail: 'sales@visitpro.com' },
+  aiConfig: { activeModel: 'Gemini', deepSeekApiKey: '' }
+};
+
+const STORAGE_KEY = 'visitpro_data';
+
 const App: React.FC = () => {
+  // --- Data Initialization Logic ---
+  // Try to load from localStorage first
+  const loadInitialState = () => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Ensure new fields exist if loading old data
+        if (!parsed.storageSettings.emailConfig) {
+            parsed.storageSettings.emailConfig = DEFAULT_STORAGE_SETTINGS.emailConfig;
+        }
+        if (!parsed.storageSettings.aiConfig) {
+            parsed.storageSettings.aiConfig = DEFAULT_STORAGE_SETTINGS.aiConfig;
+        }
+        return parsed;
+      } catch (e) {
+        console.error("Failed to parse local storage", e);
+      }
+    }
+    return null;
+  };
+
+  const initialState = loadInitialState();
+
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User>(MOCK_USERS[0]);
-  const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
   
   // Data State
-  const [users, setUsers] = useState<User[]>(MOCK_USERS);
-  const [clients, setClients] = useState<Client[]>(MOCK_CLIENTS);
-  const [visits, setVisits] = useState<Visit[]>(MOCK_VISITS);
-  const [fieldDefinitions, setFieldDefinitions] = useState<CustomFieldDefinition[]>(MOCK_FIELD_DEFINITIONS);
+  const [users, setUsers] = useState<User[]>(initialState?.users || MOCK_USERS);
+  const [clients, setClients] = useState<Client[]>(initialState?.clients || MOCK_CLIENTS);
+  const [visits, setVisits] = useState<Visit[]>(initialState?.visits || MOCK_VISITS);
+  const [fieldDefinitions, setFieldDefinitions] = useState<CustomFieldDefinition[]>(initialState?.fieldDefinitions || MOCK_FIELD_DEFINITIONS);
+  const [storageSettings, setStorageSettings] = useState<StorageSettings>(initialState?.storageSettings || DEFAULT_STORAGE_SETTINGS);
+
+  const [currentUser, setCurrentUser] = useState<User>(users[0]); // Default to first user found
+  const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
+
+  // --- Persistence Logic ---
+  useEffect(() => {
+    if (storageSettings.mode === 'LOCAL_FILE') {
+        const dataToSave = {
+            users,
+            clients,
+            visits,
+            fieldDefinitions,
+            storageSettings
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+    }
+  }, [users, clients, visits, fieldDefinitions, storageSettings]);
+
+  // --- Storage & Backup Handlers ---
+  const handleBackupData = () => {
+      const data = {
+          metadata: { version: '1.0', exportDate: new Date().toISOString() },
+          users,
+          clients,
+          visits,
+          fieldDefinitions,
+          storageSettings: { ...storageSettings, lastBackupDate: new Date().toISOString() }
+      };
+      
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `VisitPro_Backup_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      // Update last backup date in state
+      setStorageSettings(prev => ({ ...prev, lastBackupDate: new Date().toISOString() }));
+  };
+
+  const handleRestoreData = (file: File) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          try {
+              const result = e.target?.result as string;
+              const data = JSON.parse(result);
+              
+              if (data.users && data.clients && data.visits) {
+                  setUsers(data.users);
+                  setClients(data.clients);
+                  setVisits(data.visits);
+                  setFieldDefinitions(data.fieldDefinitions || MOCK_FIELD_DEFINITIONS);
+                  setStorageSettings(data.storageSettings || DEFAULT_STORAGE_SETTINGS);
+                  alert('数据恢复成功！');
+              } else {
+                  alert('无效的备份文件格式。');
+              }
+          } catch (err) {
+              console.error(err);
+              alert('读取备份文件失败，请确保是有效的 JSON 文件。');
+          }
+      };
+      reader.readAsText(file);
+  };
 
   // Client Actions
   const handleAddClient = (newClient: Client) => {
@@ -200,7 +300,7 @@ const App: React.FC = () => {
                   
                   <div className="absolute bottom-full left-0 w-full mb-2 bg-white rounded-lg shadow-lg p-2 hidden group-hover:block text-gray-800 z-50">
                       <p className="text-xs text-gray-500 mb-1 px-2">切换用户 (Demo)</p>
-                      {MOCK_USERS.map(u => (
+                      {users.map(u => (
                           <button 
                             key={u.id}
                             onClick={() => setCurrentUser(u)}
@@ -270,10 +370,13 @@ const App: React.FC = () => {
                     onAddVisit={handleAddVisit} 
                     onUpdateVisit={handleUpdateVisit}
                     onDeleteVisit={handleDeleteVisit}
+                    onUpdateClient={handleUpdateClient}
                     fieldDefinitions={fieldDefinitions}
                     initialEditingVisitId={selectedVisitId}
                     onClearInitialEditingVisitId={() => setSelectedVisitId(null)}
                     currentUserId={currentUser.id}
+                    storageSettings={storageSettings}
+                    onUpdateStorageSettings={setStorageSettings}
                   />
               )}
               {view === ViewState.ADMIN && currentUser.role === 'Admin' && (
@@ -286,6 +389,10 @@ const App: React.FC = () => {
                     fieldDefinitions={fieldDefinitions}
                     onAddField={handleAddField}
                     onDeleteField={handleDeleteField}
+                    storageSettings={storageSettings}
+                    onUpdateStorageSettings={setStorageSettings}
+                    onBackupData={handleBackupData}
+                    onRestoreData={handleRestoreData}
                   />
               )}
               {view === ViewState.ADMIN && currentUser.role !== 'Admin' && (

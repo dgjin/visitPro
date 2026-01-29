@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { AIAnalysisResult } from "../types";
+import { AIAnalysisResult, AIModelProvider } from "../types";
 
 // Always use named parameter for apiKey and use process.env.API_KEY directly.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -54,23 +54,62 @@ const cleanJsonString = (text: string) => {
   return clean;
 };
 
+// DeepSeek specific implementation
+const analyzeWithDeepSeek = async (
+  prompt: string,
+  apiKey: string
+): Promise<AIAnalysisResult> => {
+    if (!apiKey) throw new Error("DeepSeek API Key 未配置");
+
+    const response = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model: "deepseek-chat",
+            messages: [
+                {
+                    role: "system",
+                    content: "你是一位专业的销售助理。你的目标是帮助销售代表将凌乱的笔记整理成专业的中文报告。请必须以严格的 JSON 格式回复，不要包含任何 Markdown 格式。JSON 结构需包含: summary(string), sentiment(Positive/Neutral/Negative), actionItems(string array), followUpEmailDraft(string)。"
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            stream: false,
+            response_format: { type: "json_object" }
+        })
+    });
+
+    if (!response.ok) {
+        const err = await response.json();
+        throw new Error(`DeepSeek API Error: ${err.error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content;
+    
+    if (!text) throw new Error("No response from DeepSeek");
+
+    try {
+        return JSON.parse(cleanJsonString(text)) as AIAnalysisResult;
+    } catch (parseError) {
+        console.error("DeepSeek JSON Parse failed:", text);
+        throw new Error("无法解析 DeepSeek 返回的 JSON 数据");
+    }
+};
+
 export const analyzeVisitNotes = async (
   clientName: string,
-  rawNotes: string
+  rawNotes: string,
+  modelProvider: AIModelProvider = 'Gemini',
+  deepSeekKey: string = ''
 ): Promise<AIAnalysisResult> => {
-  if (!process.env.API_KEY) {
-    console.warn("API Key is missing. Returning mock data.");
-    return {
-      transcription: rawNotes,
-      summary: "未检测到 API Key。这是模拟摘要。",
-      sentiment: "Neutral",
-      actionItems: ["检查配置"],
-      followUpEmailDraft: "请配置您的 API Key。"
-    };
-  }
-
-  try {
-    const prompt = `
+  
+  const prompt = `
       我刚刚结束了对客户 "${clientName}" 的拜访。
       这是我的原始会议笔记：
       "${rawNotes}"
@@ -82,6 +121,23 @@ export const analyzeVisitNotes = async (
       4. 一份礼貌且相关的跟进邮件草稿，供我发送给客户。
     `;
 
+  if (modelProvider === 'DeepSeek') {
+      return analyzeWithDeepSeek(prompt, deepSeekKey);
+  }
+
+  // Default to Gemini
+  if (!process.env.API_KEY) {
+    console.warn("API Key is missing. Returning mock data.");
+    return {
+      transcription: rawNotes,
+      summary: "未检测到 Gemini API Key。这是模拟摘要。",
+      sentiment: "Neutral",
+      actionItems: ["检查配置"],
+      followUpEmailDraft: "请配置您的 API Key。"
+    };
+  }
+
+  try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,

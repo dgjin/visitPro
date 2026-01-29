@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
-import { User, CustomFieldDefinition } from '../types';
-import { Users, Settings, Plus, Trash2, Shield, User as UserIcon, Type, Hash, Calendar, Pencil, X, Phone, Briefcase, Users2 } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { User, CustomFieldDefinition, StorageSettings, MySQLConfig } from '../types';
+import { Users, Settings, Plus, Trash2, Shield, User as UserIcon, Type, Hash, Calendar, Pencil, X, Phone, Briefcase, Users2, Database, Save, Upload, Download, HardDrive, Server, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface AdminPanelProps {
   users: User[];
@@ -12,6 +12,11 @@ interface AdminPanelProps {
   fieldDefinitions: CustomFieldDefinition[];
   onAddField: (field: CustomFieldDefinition) => void;
   onDeleteField: (fieldId: string) => void;
+  // Storage Props
+  storageSettings: StorageSettings;
+  onUpdateStorageSettings: (settings: StorageSettings) => void;
+  onBackupData: () => void;
+  onRestoreData: (file: File) => void;
 }
 
 const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -23,8 +28,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   fieldDefinitions,
   onAddField,
   onDeleteField,
+  storageSettings,
+  onUpdateStorageSettings,
+  onBackupData,
+  onRestoreData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'USERS' | 'FIELDS'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'FIELDS' | 'STORAGE'>('USERS');
   
   // User Modal State
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -39,6 +48,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   
   // Field Form State
   const [newField, setNewField] = useState<Partial<CustomFieldDefinition>>({ target: 'Client', type: 'text' });
+
+  // MySQL Form State
+  const [mysqlConfig, setMysqlConfig] = useState<MySQLConfig>(storageSettings.mysqlConfig);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openUserModal = (user?: User) => {
       if (user) {
@@ -102,6 +116,34 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     setNewField({ target: 'Client', type: 'text', label: '' });
   };
 
+  const handleSaveStorageSettings = () => {
+      onUpdateStorageSettings({
+          ...storageSettings,
+          mysqlConfig
+      });
+      alert('存储配置已更新');
+  };
+
+  const handleTestConnection = () => {
+      setIsTestingConnection(true);
+      // Simulate network request
+      setTimeout(() => {
+          setIsTestingConnection(false);
+          alert('无法连接到数据库。注意：作为纯前端演示应用，无法直接连接 MySQL 数据库。在实际生产环境中，这里将调用后端 API 进行连接测试。');
+      }, 1500);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          if (confirm('恢复备份将覆盖当前所有数据，此操作不可撤销。确定要继续吗？')) {
+              onRestoreData(file);
+          }
+          // Reset input
+          if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+  };
+
   const userFieldDefinitions = fieldDefinitions.filter(f => f.target === 'User');
 
   // Fix: Made children optional to resolve TS error where children are perceived as missing in JSX tags
@@ -125,13 +167,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
             onClick={() => setActiveTab('USERS')}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center ${activeTab === 'USERS' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
           >
-            <Users className="w-4 h-4 mr-2" /> 团队成员管理
+            <Users className="w-4 h-4 mr-2" /> 团队成员
           </button>
           <button
             onClick={() => setActiveTab('FIELDS')}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center ${activeTab === 'FIELDS' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
           >
-            <Settings className="w-4 h-4 mr-2" /> 配置中心
+            <Settings className="w-4 h-4 mr-2" /> 字段配置
+          </button>
+          <button
+            onClick={() => setActiveTab('STORAGE')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center ${activeTab === 'STORAGE' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            <Database className="w-4 h-4 mr-2" /> 存储与备份
           </button>
         </div>
       </div>
@@ -382,6 +430,177 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               </button>
             </form>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'STORAGE' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="space-y-6">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                        <h3 className="font-bold text-gray-900 flex items-center">
+                            <Database className="w-5 h-5 mr-2 text-blue-600" /> 存储方式配置
+                        </h3>
+                    </div>
+                    <div className="p-6 space-y-6">
+                         <div>
+                             <InputLabel>选择数据存储模式</InputLabel>
+                             <div className="grid grid-cols-2 gap-4 mt-2">
+                                 <button
+                                     onClick={() => onUpdateStorageSettings({...storageSettings, mode: 'LOCAL_FILE'})}
+                                     className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${storageSettings.mode === 'LOCAL_FILE' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}
+                                 >
+                                     <HardDrive className="w-8 h-8 mb-2" />
+                                     <span className="font-bold text-sm">本地/文件存储</span>
+                                     <span className="text-xs text-center mt-1 opacity-70">浏览器本地保存 + JSON 文件备份</span>
+                                 </button>
+                                 <button
+                                     onClick={() => onUpdateStorageSettings({...storageSettings, mode: 'MYSQL'})}
+                                     className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${storageSettings.mode === 'MYSQL' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}
+                                 >
+                                     <Server className="w-8 h-8 mb-2" />
+                                     <span className="font-bold text-sm">MySQL 数据库</span>
+                                     <span className="text-xs text-center mt-1 opacity-70">连接远程 MySQL 数据库 (需后端)</span>
+                                 </button>
+                             </div>
+                         </div>
+
+                         {storageSettings.mode === 'MYSQL' && (
+                             <div className="space-y-4 animate-fade-in">
+                                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start space-x-3">
+                                     <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
+                                     <div className="text-xs text-yellow-700">
+                                         <b>注意：</b> 由于浏览器安全限制，前端页面无法直接连接 MySQL 数据库。此配置仅为演示界面，实际生产环境需要配合后端 API 服务。
+                                     </div>
+                                 </div>
+                                 <div className="grid grid-cols-2 gap-4">
+                                     <div className="col-span-2">
+                                         <InputLabel>主机地址 (Host)</InputLabel>
+                                         <FormInput 
+                                             value={mysqlConfig.host}
+                                             onChange={e => setMysqlConfig({...mysqlConfig, host: e.target.value})}
+                                             placeholder="127.0.0.1"
+                                         />
+                                     </div>
+                                     <div>
+                                         <InputLabel>端口 (Port)</InputLabel>
+                                         <FormInput 
+                                             value={mysqlConfig.port}
+                                             onChange={e => setMysqlConfig({...mysqlConfig, port: e.target.value})}
+                                             placeholder="3306"
+                                         />
+                                     </div>
+                                     <div>
+                                         <InputLabel>数据库名</InputLabel>
+                                         <FormInput 
+                                             value={mysqlConfig.database}
+                                             onChange={e => setMysqlConfig({...mysqlConfig, database: e.target.value})}
+                                             placeholder="visitpro_db"
+                                         />
+                                     </div>
+                                     <div>
+                                         <InputLabel>用户名</InputLabel>
+                                         <FormInput 
+                                             value={mysqlConfig.username}
+                                             onChange={e => setMysqlConfig({...mysqlConfig, username: e.target.value})}
+                                             placeholder="root"
+                                         />
+                                     </div>
+                                     <div>
+                                         <InputLabel>密码</InputLabel>
+                                         <FormInput 
+                                             type="password"
+                                             value={mysqlConfig.password}
+                                             onChange={e => setMysqlConfig({...mysqlConfig, password: e.target.value})}
+                                             placeholder="••••••"
+                                         />
+                                     </div>
+                                 </div>
+                                 <div className="flex space-x-3 pt-2">
+                                     <button 
+                                         onClick={handleTestConnection}
+                                         className="flex-1 bg-gray-800 hover:bg-gray-900 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
+                                     >
+                                         {isTestingConnection ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
+                                         {isTestingConnection ? '连接中...' : '测试连接'}
+                                     </button>
+                                     <button 
+                                         onClick={handleSaveStorageSettings}
+                                         className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
+                                     >
+                                         <Save className="w-4 h-4 mr-2" />
+                                         保存配置
+                                     </button>
+                                 </div>
+                             </div>
+                         )}
+
+                         {storageSettings.mode === 'LOCAL_FILE' && (
+                             <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start space-x-3 animate-fade-in">
+                                 <CheckCircle className="w-5 h-5 text-green-600 mt-0.5" />
+                                 <div className="text-sm text-green-800">
+                                     <b>当前状态：</b> 数据已启用本地持久化。所有更改将自动保存到浏览器 LocalStorage 中，刷新页面不会丢失数据。请定期使用右侧的备份功能导出数据。
+                                 </div>
+                             </div>
+                         )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="space-y-6">
+                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                        <h3 className="font-bold text-gray-900 flex items-center">
+                            <Save className="w-5 h-5 mr-2 text-indigo-600" /> 数据备份与恢复
+                        </h3>
+                    </div>
+                    <div className="p-6 space-y-6">
+                         <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
+                             <div className="flex items-center justify-between mb-2">
+                                 <h4 className="font-bold text-gray-800">数据备份 (导出)</h4>
+                                 <Download className="w-5 h-5 text-gray-400" />
+                             </div>
+                             <p className="text-xs text-gray-500 mb-4">将当前系统中的所有客户、拜访记录、用户及配置信息导出为 JSON 文件。建议定期备份。</p>
+                             <button 
+                                 onClick={onBackupData}
+                                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold text-sm transition-colors flex items-center justify-center shadow-md shadow-indigo-100"
+                             >
+                                 <Download className="w-4 h-4 mr-2" />
+                                 立即导出备份数据
+                             </button>
+                             {storageSettings.lastBackupDate && (
+                                 <p className="text-[10px] text-gray-400 mt-2 text-center">上次备份时间: {new Date(storageSettings.lastBackupDate).toLocaleString('zh-CN')}</p>
+                             )}
+                         </div>
+
+                         <div className="border-t border-gray-100 pt-6">
+                            <div className="bg-white rounded-lg p-4 border-2 border-dashed border-gray-200 hover:border-blue-300 hover:bg-blue-50/30 transition-all text-center">
+                                <div className="flex flex-col items-center justify-center space-y-2">
+                                    <div className="p-3 bg-blue-50 rounded-full">
+                                        <Upload className="w-6 h-6 text-blue-600" />
+                                    </div>
+                                    <h4 className="font-bold text-gray-800">数据恢复 (导入)</h4>
+                                    <p className="text-xs text-gray-500 max-w-xs mx-auto">点击选择或拖拽备份文件 (JSON) 至此。注意：导入将覆盖当前所有数据。</p>
+                                    
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef}
+                                        accept=".json"
+                                        onChange={handleFileChange}
+                                        className="hidden" 
+                                    />
+                                    <button 
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="mt-2 px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-xs font-bold rounded-lg transition-colors"
+                                    >
+                                        选择文件
+                                    </button>
+                                </div>
+                            </div>
+                         </div>
+                    </div>
+                 </div>
+            </div>
         </div>
       )}
     </div>
