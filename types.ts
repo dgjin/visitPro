@@ -8,9 +8,9 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  phone: string; // Added field
-  department: string; // Added field
-  teamName: string; // Added field
+  phone: string;
+  department: string;
+  teamName: string;
   role: 'Admin' | 'User';
   avatarUrl: string;
   customFields?: CustomFieldData[];
@@ -40,20 +40,24 @@ export interface Attachment {
   id: string;
   name: string;
   type: 'image' | 'document' | 'other';
-  url: string; // Base64 data URL for this demo
+  url: string;
 }
+
+export type VisitCategory = 'Outbound' | 'Inbound';
 
 export interface Visit {
   id: string;
   clientId: string;
-  clientName: string; // Denormalized for easier display
-  userId: string; // The ID of the user who performed the visit
-  date: string; // ISO String
+  clientName: string;
+  userId: string;
+  date: string;
+  category: VisitCategory; // 新增：分类（外出拜访/客户到访）
   summary: string;
   rawNotes: string;
+  participants?: string;
   outcome: 'Positive' | 'Neutral' | 'Negative' | 'Pending';
   actionItems: string[];
-  sentimentScore: number; // 0 to 100
+  sentimentScore: number;
   followUpEmailDraft?: string;
   customFields?: CustomFieldData[];
   attachments?: Attachment[];
@@ -69,6 +73,7 @@ export enum ViewState {
 export interface AIAnalysisResult {
   summary: string;
   sentiment: 'Positive' | 'Neutral' | 'Negative';
+  painPoints: string[]; // Added: Specific pain points identified
   actionItems: string[];
   followUpEmailDraft: string;
   transcription?: string;
@@ -76,6 +81,7 @@ export interface AIAnalysisResult {
 
 export type StorageMode = 'LOCAL_FILE' | 'MYSQL';
 export type AIModelProvider = 'Gemini' | 'DeepSeek';
+export type EmailTone = 'Formal' | 'Friendly' | 'Concise'; // Added: Email tone options
 
 export interface MySQLConfig {
   host: string;
@@ -90,6 +96,9 @@ export interface EmailConfig {
   smtpPort: string;
   senderName: string;
   senderEmail: string;
+  authEnabled: boolean; // 新增：是否开启验证
+  authUsername?: string; // 新增：验证用户名
+  authPassword?: string; // 新增：验证密码
 }
 
 export interface AIConfig {
@@ -97,10 +106,17 @@ export interface AIConfig {
   deepSeekApiKey: string;
 }
 
+export interface IFlyTekConfig {
+  appId: string;
+  apiSecret: string;
+  apiKey: string;
+}
+
 export interface StorageSettings {
   mode: StorageMode;
   mysqlConfig: MySQLConfig;
   emailConfig: EmailConfig;
   aiConfig: AIConfig;
+  iflytekConfig: IFlyTekConfig;
   lastBackupDate?: string;
 }

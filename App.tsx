@@ -7,7 +7,6 @@ import VisitManager from './components/VisitManager';
 import AdminPanel from './components/AdminPanel';
 import { Client, Visit, ViewState, User, CustomFieldDefinition, StorageSettings } from './types';
 
-// Mock Data (Used as fallback if local storage is empty)
 const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
   { id: 'f1', target: 'Client', label: '职位', type: 'text' },
   { id: 'f2', target: 'Client', label: '首选语言', type: 'text' },
@@ -18,94 +17,47 @@ const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
 ];
 
 const MOCK_USERS: User[] = [
-  { 
-    id: 'u1', 
-    name: 'John Doe', 
-    email: 'john@example.com', 
-    phone: '138-0013-8001',
-    department: '销售部',
-    teamName: '华东大区一组',
-    role: 'Admin', 
-    avatarUrl: 'https://picsum.photos/seed/u1/200',
-    customFields: [
-      { fieldId: 'f6', value: 'EMP001' }
-    ]
-  },
-  { 
-    id: 'u2', 
-    name: 'Jane Smith', 
-    email: 'jane@example.com', 
-    phone: '139-1122-3344',
-    department: '市场部',
-    teamName: '内容运营组',
-    role: 'User', 
-    avatarUrl: 'https://picsum.photos/seed/u2/200',
-    customFields: [
-      { fieldId: 'f6', value: 'EMP002' }
-    ]
-  },
+  { id: 'u1', name: 'John Doe', email: 'john@example.com', phone: '138-0013-8001', department: '销售部', teamName: '华东大区一组', role: 'Admin', avatarUrl: 'https://picsum.photos/seed/u1/200', customFields: [{ fieldId: 'f6', value: 'EMP001' }] },
+  { id: 'u2', name: 'Jane Smith', email: 'jane@example.com', phone: '139-1122-3344', department: '市场部', teamName: '内容运营组', role: 'User', avatarUrl: 'https://picsum.photos/seed/u2/200', customFields: [{ fieldId: 'f6', value: 'EMP002' }] },
 ];
 
 const MOCK_CLIENTS: Client[] = [
-  { 
-    id: '1', 
-    name: '艾丽斯·弗里曼', 
-    company: '泰克诺瓦 (TechNova)', 
-    email: 'alice@technova.com', 
-    phone: '555-0123', 
-    address: '科技大道 123 号', 
-    avatarUrl: 'https://picsum.photos/seed/alice/200', 
-    industry: 'SaaS', 
-    status: 'Active',
-    customFields: [
-      { fieldId: 'f1', value: 'CTO' },
-      { fieldId: 'f2', value: '英语' }
-    ]
-  },
-  { 
-    id: '2', 
-    name: '鲍勃·史密斯', 
-    company: '必筑公司 (BuildCo)', 
-    email: 'bob@buildco.com', 
-    phone: '555-0199', 
-    address: '建设路 456 号', 
-    avatarUrl: 'https://picsum.photos/seed/bob/200', 
-    industry: 'Construction', 
-    status: 'Lead',
-    customFields: [
-      { fieldId: 'f3', value: '50万-100万' }
-    ]
-  },
+  { id: '1', name: '艾丽斯·弗里曼', company: '泰克诺瓦 (TechNova)', email: 'alice@technova.com', phone: '555-0123', address: '科技大道 123 号', avatarUrl: 'https://picsum.photos/seed/alice/200', industry: 'SaaS', status: 'Active', customFields: [{ fieldId: 'f1', value: 'CTO' }, { fieldId: 'f2', value: '英语' }] },
+  { id: '2', name: '鲍勃·史密斯', company: '必筑公司 (BuildCo)', email: 'bob@buildco.com', phone: '555-0199', address: '建设路 456 号', avatarUrl: 'https://picsum.photos/seed/bob/200', industry: 'Construction', status: 'Lead', customFields: [{ fieldId: 'f3', value: '50万-100万' }] },
 ];
 
 const MOCK_VISITS: Visit[] = [
-  { id: '101', userId: 'u1', clientId: '1', clientName: '艾丽斯·弗里曼', date: new Date(Date.now() - 86400000 * 2).toISOString(), summary: '讨论了第三季度的路线图。客户对目前的进展感到满意，但要求增加一项新的报告功能。', rawNotes: '讨论Q3路线图。客户想要新报表功能。整体满意。', outcome: 'Positive', actionItems: ['发送 API 文档', '安排技术评审'], sentimentScore: 85, customFields: [{ fieldId: 'f4', value: '60' }, { fieldId: 'f5', value: '3' }], followUpEmailDraft: 'Subject: Q3 Roadmap...' },
-  { id: '102', userId: 'u2', clientId: '2', clientName: '鲍勃·史密斯', date: new Date(Date.now() - 86400000 * 5).toISOString(), summary: '初步需求会议。客户预算低于预期。需要调整提案。', rawNotes: '预算太低。需调整。', outcome: 'Neutral', actionItems: ['修改报价', '邮件跟进'], sentimentScore: 50, followUpEmailDraft: 'Subject: Revised Proposal...' },
+  { id: '101', userId: 'u1', clientId: '1', clientName: '艾丽斯·弗里曼', date: new Date(Date.now() - 86400000 * 2).toISOString(), category: 'Outbound', summary: '讨论了第三季度的路线图。客户对目前的进展感到满意，但要求增加一项新的报告功能。', rawNotes: '讨论Q3路线图。客户想要新报表功能。整体满意。', participants: 'CTO Alice, Sales John', outcome: 'Positive', actionItems: ['发送 API 文档', '安排技术评审'], sentimentScore: 85, customFields: [{ fieldId: 'f4', value: '60' }, { fieldId: 'f5', value: '3' }], followUpEmailDraft: 'Subject: Q3 Roadmap...' },
+  { id: '102', userId: 'u2', clientId: '2', clientName: '鲍勃·史密斯', date: new Date(Date.now() - 86400000 * 5).toISOString(), category: 'Inbound', summary: '初步需求会议。客户预算低于预期。需要调整提案。', rawNotes: '预算太低。需调整。', participants: 'Bob Smith, Jane Smith', outcome: 'Neutral', actionItems: ['修改报价', '邮件跟进'], sentimentScore: 50, followUpEmailDraft: 'Subject: Revised Proposal...' },
 ];
 
 const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
   mode: 'LOCAL_FILE',
   mysqlConfig: { host: '', port: '3306', username: '', password: '', database: '' },
-  emailConfig: { smtpHost: 'smtp.example.com', smtpPort: '587', senderName: 'VisitPro Agent', senderEmail: 'sales@visitpro.com' },
-  aiConfig: { activeModel: 'Gemini', deepSeekApiKey: '' }
+  emailConfig: { smtpHost: 'smtp.example.com', smtpPort: '587', senderName: 'VisitPro Agent', senderEmail: 'sales@visitpro.com', authEnabled: false, authUsername: '', authPassword: '' },
+  aiConfig: { activeModel: 'Gemini', deepSeekApiKey: '' },
+  iflytekConfig: { appId: '', apiSecret: '', apiKey: '' }
 };
 
 const STORAGE_KEY = 'visitpro_data';
 
 const App: React.FC = () => {
-  // --- Data Initialization Logic ---
-  // Try to load from localStorage first
   const loadInitialState = () => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Ensure new fields exist if loading old data
+        // 迁移旧数据
         if (!parsed.storageSettings.emailConfig) {
             parsed.storageSettings.emailConfig = DEFAULT_STORAGE_SETTINGS.emailConfig;
+        } else if (parsed.storageSettings.emailConfig.authEnabled === undefined) {
+            parsed.storageSettings.emailConfig.authEnabled = false;
+            parsed.storageSettings.emailConfig.authUsername = '';
+            parsed.storageSettings.emailConfig.authPassword = '';
         }
-        if (!parsed.storageSettings.aiConfig) {
-            parsed.storageSettings.aiConfig = DEFAULT_STORAGE_SETTINGS.aiConfig;
+        // 迁移 iFlytek 配置
+        if (!parsed.storageSettings.iflytekConfig) {
+            parsed.storageSettings.iflytekConfig = DEFAULT_STORAGE_SETTINGS.iflytekConfig;
         }
         return parsed;
       } catch (e) {
@@ -119,42 +71,23 @@ const App: React.FC = () => {
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
-  // Data State
   const [users, setUsers] = useState<User[]>(initialState?.users || MOCK_USERS);
   const [clients, setClients] = useState<Client[]>(initialState?.clients || MOCK_CLIENTS);
   const [visits, setVisits] = useState<Visit[]>(initialState?.visits || MOCK_VISITS);
   const [fieldDefinitions, setFieldDefinitions] = useState<CustomFieldDefinition[]>(initialState?.fieldDefinitions || MOCK_FIELD_DEFINITIONS);
   const [storageSettings, setStorageSettings] = useState<StorageSettings>(initialState?.storageSettings || DEFAULT_STORAGE_SETTINGS);
-
-  const [currentUser, setCurrentUser] = useState<User>(users[0]); // Default to first user found
+  const [currentUser, setCurrentUser] = useState<User>(users[0]);
   const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
 
-  // --- Persistence Logic ---
   useEffect(() => {
     if (storageSettings.mode === 'LOCAL_FILE') {
-        const dataToSave = {
-            users,
-            clients,
-            visits,
-            fieldDefinitions,
-            storageSettings
-        };
+        const dataToSave = { users, clients, visits, fieldDefinitions, storageSettings };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
     }
   }, [users, clients, visits, fieldDefinitions, storageSettings]);
 
-  // --- Storage & Backup Handlers ---
   const handleBackupData = () => {
-      const data = {
-          metadata: { version: '1.0', exportDate: new Date().toISOString() },
-          users,
-          clients,
-          visits,
-          fieldDefinitions,
-          storageSettings: { ...storageSettings, lastBackupDate: new Date().toISOString() }
-      };
-      
+      const data = { metadata: { version: '1.1', exportDate: new Date().toISOString() }, users, clients, visits, fieldDefinitions, storageSettings: { ...storageSettings, lastBackupDate: new Date().toISOString() } };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -164,8 +97,6 @@ const App: React.FC = () => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
-      // Update last backup date in state
       setStorageSettings(prev => ({ ...prev, lastBackupDate: new Date().toISOString() }));
   };
 
@@ -173,9 +104,7 @@ const App: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (e) => {
           try {
-              const result = e.target?.result as string;
-              const data = JSON.parse(result);
-              
+              const data = JSON.parse(e.target?.result as string);
               if (data.users && data.clients && data.visits) {
                   setUsers(data.users);
                   setClients(data.clients);
@@ -187,74 +116,28 @@ const App: React.FC = () => {
                   alert('无效的备份文件格式。');
               }
           } catch (err) {
-              console.error(err);
-              alert('读取备份文件失败，请确保是有效的 JSON 文件。');
+              alert('读取备份文件失败。');
           }
       };
       reader.readAsText(file);
   };
 
-  // Client Actions
-  const handleAddClient = (newClient: Client) => {
-    setClients(prev => [...prev, newClient]);
-  };
-  const handleUpdateClient = (updatedClient: Client) => {
-    setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-  };
-  const handleDeleteClient = (clientId: string) => {
-    if (confirm('确定要删除此客户吗？相关的拜访记录可能也会受到影响。')) {
-      setClients(prev => prev.filter(c => c.id !== clientId));
-    }
-  };
-
-  // Visit Actions
-  const handleAddVisit = (newVisit: Visit) => {
-    setVisits(prev => [newVisit, ...prev]);
-  };
-  const handleUpdateVisit = (updatedVisit: Visit) => {
-    setVisits(prev => prev.map(v => v.id === updatedVisit.id ? updatedVisit : v));
-  };
-  const handleDeleteVisit = (visitId: string) => {
-    if (confirm('确定要删除这条拜访记录吗？')) {
-      setVisits(prev => prev.filter(v => v.id !== visitId));
-    }
-  };
-
-  const handleVisitClick = (visitId: string) => {
-    setSelectedVisitId(visitId);
-    setView(ViewState.VISITS);
-  };
-
-  // User/Admin Actions
+  const handleAddClient = (newClient: Client) => setClients(prev => [...prev, newClient]);
+  const handleUpdateClient = (updatedClient: Client) => setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+  const handleDeleteClient = (clientId: string) => { if (confirm('确定要删除此客户吗？')) setClients(prev => prev.filter(c => c.id !== clientId)); };
+  const handleAddVisit = (newVisit: Visit) => setVisits(prev => [newVisit, ...prev]);
+  const handleUpdateVisit = (updatedVisit: Visit) => setVisits(prev => prev.map(v => v.id === updatedVisit.id ? updatedVisit : v));
+  const handleDeleteVisit = (visitId: string) => { if (confirm('确定要删除这条拜访记录吗？')) setVisits(prev => prev.filter(v => v.id !== visitId)); };
+  const handleVisitClick = (visitId: string) => { setSelectedVisitId(visitId); setView(ViewState.VISITS); };
   const handleAddUser = (user: User) => setUsers(prev => [...prev, user]);
-  const handleUpdateUser = (updatedUser: User) => {
-      setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-      if (currentUser.id === updatedUser.id) setCurrentUser(updatedUser);
-  };
-  const handleDeleteUser = (id: string) => {
-    if (confirm('确定要删除此用户吗？')) {
-      setUsers(prev => prev.filter(u => u.id !== id));
-    }
-  };
-  const handleUpdateUserRole = (id: string, role: 'Admin' | 'User') => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, role } : u));
-    if (currentUser.id === id) setCurrentUser(prev => ({ ...prev, role }));
-  };
-
+  const handleUpdateUser = (updatedUser: User) => { setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u)); if (currentUser.id === updatedUser.id) setCurrentUser(updatedUser); };
+  const handleDeleteUser = (id: string) => { if (confirm('确定要删除此用户吗？')) setUsers(prev => prev.filter(u => u.id !== id)); };
+  const handleUpdateUserRole = (id: string, role: 'Admin' | 'User') => { setUsers(prev => prev.map(u => u.id === id ? { ...u, role } : u)); if (currentUser.id === id) setCurrentUser(prev => ({ ...prev, role })); };
   const handleAddField = (field: CustomFieldDefinition) => setFieldDefinitions(prev => [...prev, field]);
   const handleDeleteField = (id: string) => setFieldDefinitions(prev => prev.filter(f => f.id !== id));
 
   const NavItem = ({ viewTarget, label, icon: Icon }: { viewTarget: ViewState, label: string, icon: any }) => (
-    <button
-      onClick={() => {
-        setView(viewTarget);
-        setIsMobileMenuOpen(false);
-      }}
-      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 
-        ${view === viewTarget 
-          ? 'bg-blue-600 text-white shadow-md' 
-          : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
-    >
+    <button onClick={() => { setView(viewTarget); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 ${view === viewTarget ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
       <Icon className="w-5 h-5" />
       <span className="font-medium">{label}</span>
     </button>
@@ -262,22 +145,16 @@ const App: React.FC = () => {
 
   return (
       <div className="flex h-screen bg-gray-50 overflow-hidden">
-        
-        {/* Sidebar */}
         <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 text-white transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="h-full flex flex-col">
             <div className="p-6 flex items-center space-x-3 border-b border-gray-800">
-              <div className="bg-gradient-to-tr from-blue-500 to-purple-600 p-2 rounded-lg">
-                <Sparkles className="w-6 h-6 text-white" />
-              </div>
+              <div className="bg-gradient-to-tr from-blue-500 to-purple-600 p-2 rounded-lg"><Sparkles className="w-6 h-6 text-white" /></div>
               <h1 className="text-xl font-bold tracking-tight">VisitPro</h1>
             </div>
-
             <nav className="flex-1 px-4 py-6 space-y-2">
               <NavItem viewTarget={ViewState.DASHBOARD} label="仪表盘" icon={LayoutDashboard} />
               <NavItem viewTarget={ViewState.CLIENTS} label="客户列表" icon={Users} />
-              <NavItem viewTarget={ViewState.VISITS} label="拜访记录" icon={CalendarCheck} />
-              
+              <NavItem viewTarget={ViewState.VISITS} label="拜访管理" icon={CalendarCheck} />
               {currentUser.role === 'Admin' && (
                  <div className="pt-4 mt-4 border-t border-gray-800">
                     <p className="px-4 text-xs font-semibold text-gray-500 uppercase mb-2">管理员</p>
@@ -285,122 +162,34 @@ const App: React.FC = () => {
                  </div>
               )}
             </nav>
-
             <div className="p-4 border-t border-gray-800 mt-auto">
-               <button className="w-full flex items-center space-x-3 px-4 py-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
-                  <Settings className="w-5 h-5" />
-                  <span>设置</span>
-               </button>
+               <button className="w-full flex items-center space-x-3 px-4 py-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"><Settings className="w-5 h-5" /><span>设置</span></button>
                <div className="mt-4 flex items-center space-x-3 px-4 relative group cursor-pointer">
                   <img src={currentUser.avatarUrl} alt="Profile" className="w-8 h-8 rounded-full bg-gray-700" />
                   <div className="text-sm">
                     <p className="text-white font-medium">{currentUser.name}</p>
                     <p className="text-gray-500 text-xs">{currentUser.role === 'Admin' ? '系统管理员' : '销售代表'}</p>
                   </div>
-                  
                   <div className="absolute bottom-full left-0 w-full mb-2 bg-white rounded-lg shadow-lg p-2 hidden group-hover:block text-gray-800 z-50">
                       <p className="text-xs text-gray-500 mb-1 px-2">切换用户 (Demo)</p>
-                      {users.map(u => (
-                          <button 
-                            key={u.id}
-                            onClick={() => setCurrentUser(u)}
-                            className={`w-full text-left px-2 py-1 text-sm rounded hover:bg-gray-100 ${currentUser.id === u.id ? 'font-bold text-blue-600' : ''}`}
-                          >
-                              {u.name} ({u.role})
-                          </button>
-                      ))}
+                      {users.map(u => (<button key={u.id} onClick={() => setCurrentUser(u)} className={`w-full text-left px-2 py-1 text-sm rounded hover:bg-gray-100 ${currentUser.id === u.id ? 'font-bold text-blue-600' : ''}`}>{u.name} ({u.role})</button>))}
                   </div>
                </div>
             </div>
           </div>
         </aside>
-
-        {/* Mobile Overlay */}
-        {isMobileMenuOpen && (
-          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />
-        )}
-
-        {/* Main Content */}
+        {isMobileMenuOpen && <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />}
         <div className="flex-1 flex flex-col h-full overflow-hidden">
-          {/* Header */}
           <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-6 lg:px-8">
-            <div className="flex items-center lg:hidden">
-              <button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-500 hover:text-gray-700">
-                <Menu className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <div className="hidden lg:flex items-center text-gray-800 font-semibold text-lg">
-              {view === ViewState.DASHBOARD && '仪表盘概览'}
-              {view === ViewState.CLIENTS && '客户目录'}
-              {view === ViewState.VISITS && '拜访管理'}
-              {view === ViewState.ADMIN && '系统管理面板'}
-            </div>
-
-            <div className="flex items-center space-x-4">
-               {view === ViewState.ADMIN && (
-                   <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full font-medium">管理员模式</span>
-               )}
-            </div>
+            <div className="flex items-center lg:hidden"><button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-500 hover:text-gray-700"><Menu className="w-6 h-6" /></button></div>
+            <div className="hidden lg:flex items-center text-gray-800 font-semibold text-lg">{view === ViewState.DASHBOARD && '仪表盘概览'}{view === ViewState.CLIENTS && '客户目录'}{view === ViewState.VISITS && '拜访管理'}{view === ViewState.ADMIN && '系统管理面板'}</div>
           </header>
-
           <main className="flex-1 overflow-y-auto p-4 lg:p-8">
             <div className="max-w-7xl mx-auto h-full">
-              {view === ViewState.DASHBOARD && (
-                  <Dashboard 
-                    visits={visits} 
-                    users={users}
-                    totalClients={clients.length} 
-                    onVisitClick={handleVisitClick}
-                  />
-              )}
-              {view === ViewState.CLIENTS && (
-                  <ClientManager 
-                    clients={clients} 
-                    onAddClient={handleAddClient} 
-                    onUpdateClient={handleUpdateClient}
-                    onDeleteClient={handleDeleteClient}
-                    fieldDefinitions={fieldDefinitions} 
-                  />
-              )}
-              {view === ViewState.VISITS && (
-                  <VisitManager 
-                    clients={clients} 
-                    visits={visits} 
-                    onAddVisit={handleAddVisit} 
-                    onUpdateVisit={handleUpdateVisit}
-                    onDeleteVisit={handleDeleteVisit}
-                    onUpdateClient={handleUpdateClient}
-                    fieldDefinitions={fieldDefinitions}
-                    initialEditingVisitId={selectedVisitId}
-                    onClearInitialEditingVisitId={() => setSelectedVisitId(null)}
-                    currentUserId={currentUser.id}
-                    storageSettings={storageSettings}
-                    onUpdateStorageSettings={setStorageSettings}
-                  />
-              )}
-              {view === ViewState.ADMIN && currentUser.role === 'Admin' && (
-                  <AdminPanel 
-                    users={users}
-                    onAddUser={handleAddUser}
-                    onUpdateUser={handleUpdateUser}
-                    onDeleteUser={handleDeleteUser}
-                    onUpdateUserRole={handleUpdateUserRole}
-                    fieldDefinitions={fieldDefinitions}
-                    onAddField={handleAddField}
-                    onDeleteField={handleDeleteField}
-                    storageSettings={storageSettings}
-                    onUpdateStorageSettings={setStorageSettings}
-                    onBackupData={handleBackupData}
-                    onRestoreData={handleRestoreData}
-                  />
-              )}
-              {view === ViewState.ADMIN && currentUser.role !== 'Admin' && (
-                  <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                      <Shield className="w-16 h-16 mb-4 text-gray-300" />
-                      <p className="text-lg">您没有权限访问此页面。</p>
-                  </div>
-              )}
+              {view === ViewState.DASHBOARD && <Dashboard visits={visits} users={users} totalClients={clients.length} onVisitClick={handleVisitClick} />}
+              {view === ViewState.CLIENTS && <ClientManager clients={clients} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} fieldDefinitions={fieldDefinitions} />}
+              {view === ViewState.VISITS && <VisitManager clients={clients} visits={visits} onAddVisit={handleAddVisit} onUpdateVisit={handleUpdateVisit} onDeleteVisit={handleDeleteVisit} onUpdateClient={handleUpdateClient} fieldDefinitions={fieldDefinitions} initialEditingVisitId={selectedVisitId} onClearInitialEditingVisitId={() => setSelectedVisitId(null)} currentUserId={currentUser.id} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} />}
+              {view === ViewState.ADMIN && currentUser.role === 'Admin' && <AdminPanel users={users} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateUserRole={handleUpdateUserRole} fieldDefinitions={fieldDefinitions} onAddField={handleAddField} onDeleteField={handleDeleteField} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} onBackupData={handleBackupData} onRestoreData={handleRestoreData} />}
             </div>
           </main>
         </div>

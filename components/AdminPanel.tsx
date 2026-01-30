@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { User, CustomFieldDefinition, StorageSettings, MySQLConfig } from '../types';
-import { Users, Settings, Plus, Trash2, Shield, User as UserIcon, Type, Hash, Calendar, Pencil, X, Phone, Briefcase, Users2, Database, Save, Upload, Download, HardDrive, Server, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Users, Settings, Plus, Trash2, Shield, User as UserIcon, Type, Hash, Calendar, Pencil, X, Phone, Briefcase, Users2, Database, Save, Upload, Download, HardDrive, Server, CheckCircle, AlertCircle, RefreshCw, Mail } from 'lucide-react';
 
 interface AdminPanelProps {
   users: User[];
@@ -146,7 +146,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const userFieldDefinitions = fieldDefinitions.filter(f => f.target === 'User');
 
-  // Fix: Made children optional to resolve TS error where children are perceived as missing in JSX tags
+  // Helper components for Storage tab
   const InputLabel = ({ children }: { children?: React.ReactNode }) => (
     <label className="block text-sm font-semibold text-gray-700 mb-1.5">{children}</label>
   );
@@ -212,7 +212,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                 <p className="text-gray-500 flex items-center"><Briefcase className="w-3 h-3 mr-1.5 text-gray-400" /> {user.department || '--'}</p>
                                 <p className="text-gray-500 flex items-center"><Users2 className="w-3 h-3 mr-1.5 text-gray-400" /> {user.teamName || '--'}</p>
                                 <p className="text-gray-500 flex items-center"><Phone className="w-3 h-3 mr-1.5 text-gray-400" /> {user.phone || '--'}</p>
-                                <p className="text-gray-500 flex items-center"><X className="w-3 h-3 mr-1.5 text-gray-400 opacity-0" /> {user.email}</p>
+                                <p className="text-gray-500 flex items-center"><Mail className="w-3 h-3 mr-1.5 text-gray-400 opacity-70" /> {user.email}</p>
                             </div>
                         </div>
                     </div>
@@ -241,105 +241,156 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
       {isUserModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden animate-scale-in">
-             <div className="bg-gray-900 px-6 py-5 flex justify-between items-center">
+             <div className="bg-gray-900 px-6 py-4 flex justify-between items-center border-b border-gray-800">
                 <div className="flex items-center space-x-3 text-white">
                     <UserIcon className="w-5 h-5 text-blue-400" />
-                    <h3 className="text-lg font-bold">成员信息维护</h3>
+                    <h3 className="text-lg font-bold">{editingUser.id ? '编辑成员' : '添加新成员'}</h3>
                 </div>
                 <button onClick={() => setIsUserModalOpen(false)} className="text-gray-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-gray-800">
                    <X className="w-6 h-6" />
                 </button>
              </div>
-             <form onSubmit={handleSaveUser} className="p-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-                    <div className="md:col-span-1">
-                        <InputLabel>姓名 <span className="text-red-500">*</span></InputLabel>
-                        <FormInput 
-                            required
-                            placeholder="请输入真实姓名"
-                            value={editingUser.name || ''}
-                            onChange={e => setEditingUser({...editingUser, name: e.target.value})}
-                        />
-                    </div>
-                    <div className="md:col-span-1">
-                        <InputLabel>邮箱地址 <span className="text-red-500">*</span></InputLabel>
-                        <FormInput 
-                            required
-                            type="email"
-                            placeholder="example@visitpro.com"
-                            value={editingUser.email || ''}
-                            onChange={e => setEditingUser({...editingUser, email: e.target.value})}
-                        />
-                    </div>
-                    <div className="md:col-span-1">
-                        <InputLabel>联系电话</InputLabel>
-                        <FormInput 
-                            placeholder="138-0000-0000"
-                            value={editingUser.phone || ''}
-                            onChange={e => setEditingUser({...editingUser, phone: e.target.value})}
-                        />
-                    </div>
-                    <div className="md:col-span-1">
-                        <InputLabel>用户角色</InputLabel>
-                        <select 
-                            className="w-full border border-gray-300 rounded-lg p-2.5 text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                            value={editingUser.role}
-                            onChange={e => setEditingUser({...editingUser, role: e.target.value as 'Admin' | 'User'})}
-                        >
-                            <option value="User">普通用户 / 销售</option>
-                            <option value="Admin">系统管理员</option>
-                        </select>
-                    </div>
-                    <div className="md:col-span-1">
-                        <InputLabel>所属部门</InputLabel>
-                        <FormInput 
-                            placeholder="例如：销售部、市场部"
-                            value={editingUser.department || ''}
-                            onChange={e => setEditingUser({...editingUser, department: e.target.value})}
-                        />
-                    </div>
-                    <div className="md:col-span-1">
-                        <InputLabel>所属团队</InputLabel>
-                        <FormInput 
-                            placeholder="例如：华南二组"
-                            value={editingUser.teamName || ''}
-                            onChange={e => setEditingUser({...editingUser, teamName: e.target.value})}
-                        />
+             
+             <form onSubmit={handleSaveUser} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                
+                {/* Basic Info Section */}
+                <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2 flex items-center">
+                        基本信息
+                    </h4>
+                    <div className="grid grid-cols-2 gap-5">
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-gray-600">姓名 <span className="text-red-500">*</span></label>
+                            <div className="relative group">
+                                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                <input 
+                                    required
+                                    className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="真实姓名"
+                                    value={editingUser.name || ''}
+                                    onChange={e => setEditingUser({...editingUser, name: e.target.value})}
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-gray-600">邮箱 <span className="text-red-500">*</span></label>
+                            <div className="relative group">
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                <input 
+                                    required
+                                    type="email"
+                                    className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="example@visitpro.com"
+                                    value={editingUser.email || ''}
+                                    onChange={e => setEditingUser({...editingUser, email: e.target.value})}
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-gray-600">联系电话</label>
+                            <div className="relative group">
+                                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                <input 
+                                    className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="138-0000-0000"
+                                    value={editingUser.phone || ''}
+                                    onChange={e => setEditingUser({...editingUser, phone: e.target.value})}
+                                />
+                            </div>
+                        </div>
                     </div>
                 </div>
 
+                {/* Role & Org Section */}
+                <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2 flex items-center">
+                        角色与组织
+                    </h4>
+                    <div className="grid grid-cols-2 gap-5">
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-gray-600">用户角色</label>
+                            <div className="relative group">
+                                <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                <select 
+                                    className="w-full pl-9 pr-8 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none cursor-pointer"
+                                    value={editingUser.role}
+                                    onChange={e => setEditingUser({...editingUser, role: e.target.value as 'Admin' | 'User'})}
+                                >
+                                    <option value="User">普通用户 / 销售</option>
+                                    <option value="Admin">系统管理员</option>
+                                </select>
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="space-y-1.5">
+                             <label className="text-xs font-semibold text-gray-600">所属部门</label>
+                             <div className="relative group">
+                                 <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                 <input 
+                                    className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="例如：销售部"
+                                    value={editingUser.department || ''}
+                                    onChange={e => setEditingUser({...editingUser, department: e.target.value})}
+                                 />
+                             </div>
+                        </div>
+                        <div className="space-y-1.5">
+                             <label className="text-xs font-semibold text-gray-600">所属团队</label>
+                             <div className="relative group">
+                                 <Users2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                 <input 
+                                    className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="例如：华南二组"
+                                    value={editingUser.teamName || ''}
+                                    onChange={e => setEditingUser({...editingUser, teamName: e.target.value})}
+                                 />
+                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Custom Fields Section */}
                 {userFieldDefinitions.length > 0 && (
-                    <div className="mt-8 pt-6 border-t border-gray-100">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">扩展属性配置</p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2 flex items-center">
+                            扩展信息
+                        </h4>
+                        <div className="grid grid-cols-2 gap-5">
                             {userFieldDefinitions.map(def => (
-                                <div key={def.id}>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">{def.label}</label>
-                                    <input 
-                                        type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
-                                        className="w-full border border-gray-300 rounded-lg p-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
-                                        value={userCustomFieldInputs[def.id] || ''}
-                                        onChange={e => setUserCustomFieldInputs({...userCustomFieldInputs, [def.id]: e.target.value})}
-                                    />
+                                <div key={def.id} className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-600">{def.label}</label>
+                                    <div className="relative group">
+                                        {/* Fallback generic icon for custom fields */}
+                                        <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                        <input 
+                                            type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
+                                            className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                            value={userCustomFieldInputs[def.id] || ''}
+                                            onChange={e => setUserCustomFieldInputs({...userCustomFieldInputs, [def.id]: e.target.value})}
+                                            placeholder={`输入${def.label}...`}
+                                        />
+                                    </div>
                                 </div>
                             ))}
                         </div>
                     </div>
                 )}
 
-                <div className="mt-10 flex space-x-4">
+                <div className="pt-6 flex space-x-3 border-t border-gray-100">
                     <button 
                         type="button" 
                         onClick={() => setIsUserModalOpen(false)} 
-                        className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl transition-all"
+                        className="flex-1 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 font-bold py-3 rounded-xl transition-colors"
                     >
                         取消
                     </button>
                     <button 
                         type="submit" 
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-200"
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-blue-100"
                     >
-                        确认保存
+                        保存信息
                     </button>
                 </div>
              </form>

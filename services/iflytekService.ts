@@ -1,9 +1,13 @@
 // 声明全局 CryptoJS，因为它是在 index.html 中通过 CDN 引入的
 declare var CryptoJS: any;
 
-const APPID = process.env.IFLYTEK_APPID || '';
+/*const APPID = process.env.IFLYTEK_APPID || '';
 const API_SECRET = process.env.IFLYTEK_API_SECRET || '';
 const API_KEY = process.env.IFLYTEK_API_KEY || '';
+*/
+const APPID = '8cc61805' || '';
+const API_SECRET = 'MjU5OTkzOWMyN2ZiNDhlMDNkNjdjMDli' || '';
+const API_KEY = 'ffed16b33a183c42c3b989d5306f0d75' || '';
 
 /**
  * 将 AudioBlob (通常是 WebM/Opus) 转换为讯飞所需的 PCM 16k 16bit 单声道格式
