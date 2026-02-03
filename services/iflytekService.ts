@@ -10,6 +10,12 @@ const APPID = '8cc61805' || '';
 const API_SECRET = 'MjU5OTkzOWMyN2ZiNDhlMDNkNjdjMDli' || '';
 const API_KEY = 'ffed16b33a183c42c3b989d5306f0d75' || '';
 
+// Global variables to manage live session state
+let socket: WebSocket | null = null;
+let audioContext: AudioContext | null = null;
+let scriptProcessor: ScriptProcessorNode | null = null;
+let mediaStream: MediaStream | null = null;
+
 /**
  * 将 AudioBlob (通常是 WebM/Opus) 转换为讯飞所需的 PCM 16k 16bit 单声道格式
  */
@@ -25,11 +31,9 @@ const convertTo16kPCM = async (audioBlob: Blob): Promise<ArrayBuffer> => {
                 reject(new Error("Failed to read audio file"));
                 return;
             }
-            // Use 'as any' to avoid TS type mismatch between ArrayBufferLike and ArrayBuffer
-            // caused by SharedArrayBuffer compatibility checks in some environments
+            // Use 'as any' to avoid TS type mismatch
             const audioBuffer = await audioContext.decodeAudioData(arrayBuffer as any);
             
-            // 使用 OfflineAudioContext 进行重采样 (44.1/48kHz -> 16kHz)
             const offlineContext = new OfflineAudioContext(1, audioBuffer.duration * 16000, 16000);
             const source = offlineContext.createBufferSource();
             source.buffer = audioBuffer;
@@ -40,7 +44,6 @@ const convertTo16kPCM = async (audioBlob: Blob): Promise<ArrayBuffer> => {
             const float32Data = resampledBuffer.getChannelData(0);
             const int16Data = new Int16Array(float32Data.length);
             
-            // Float32 -> Int16 PCM
             for (let i = 0; i < float32Data.length; i++) {
                 const s = Math.max(-1, Math.min(1, float32Data[i]));
                 int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
@@ -77,9 +80,182 @@ const getWebSocketUrl = () => {
 };
 
 /**
- * 调用讯飞语音听写接口
+ * 启动实时语音转写
  */
-export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
+export const startLiveTranscription = async (
+    onTextUpdate: (text: string) => void,
+    onError: (error: string) => void
+) => {
+    if (!APPID || !API_SECRET || !API_KEY) {
+        onError("请在 index.html 或环境变量中配置讯飞 APPID, API_SECRET 和 API_KEY");
+        return;
+    }
+
+    try {
+        // 1. Setup Audio Input
+        // Request 16k directly to let browser handle hardware resampling
+        mediaStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { 
+                sampleRate: 16000, 
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true
+            } 
+        });
+
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        // 2. Setup WebSocket
+        const url = getWebSocketUrl();
+        socket = new WebSocket(url);
+        let currentText = "";
+
+        socket.onopen = () => {
+            console.log("iFlytek WebSocket Connected");
+            // Send Handshake Frame
+            const params = {
+                common: { app_id: APPID },
+                business: {
+                    language: "zh_cn",
+                    domain: "iat",
+                    accent: "mandarin",
+                    vad_eos: 5000,
+                    dwa: "wpgs" // 开启动态修正
+                },
+                data: {
+                    status: 0,
+                    format: "audio/L16;rate=16000",
+                    encoding: "raw"
+                }
+            };
+            socket?.send(JSON.stringify(params));
+        };
+
+        socket.onmessage = (e) => {
+            const response = JSON.parse(e.data);
+            if (response.code !== 0) {
+                console.error("iFlytek Error:", response);
+                onError(`API Error: ${response.code} ${response.message}`);
+                stopLiveTranscription();
+                return;
+            }
+
+            if (response.data && response.data.result) {
+                const ws = response.data.result.ws;
+                let str = "";
+                ws.forEach((w: any) => {
+                    w.cw.forEach((c: any) => {
+                        str += c.w;
+                    });
+                });
+                
+                // Note: For simplicity in this demo we accumulate text.
+                // A robust implementation would handle 'pgs' (progressive) replacement logic.
+                currentText += str;
+                onTextUpdate(currentText);
+
+                if (response.data.status === 2) {
+                    // Session ended by server
+                    // stopLiveTranscription(); // Optional: auto stop or wait for user
+                }
+            }
+        };
+
+        socket.onerror = (e) => {
+            console.error("WebSocket Error", e);
+            onError("WebSocket Connection Error");
+        };
+
+        socket.onclose = () => {
+            console.log("iFlytek WebSocket Closed");
+        };
+
+        // 3. Process Audio
+        scriptProcessor.onaudioprocess = (e) => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const inputData = e.inputBuffer.getChannelData(0);
+                
+                // Convert Float32 to Int16
+                const buffer = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    const s = Math.max(-1, Math.min(1, inputData[i]));
+                    buffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+
+                // Base64 Encode
+                const bytes = new Uint8Array(buffer.buffer);
+                let binary = '';
+                const len = bytes.byteLength;
+                for (let i = 0; i < len; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                const base64Audio = btoa(binary);
+
+                // Send Data Frame
+                socket.send(JSON.stringify({
+                    data: {
+                        status: 1,
+                        format: "audio/L16;rate=16000",
+                        encoding: "raw",
+                        audio: base64Audio
+                    }
+                }));
+            }
+        };
+
+        // Connect nodes
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(audioContext.destination);
+
+    } catch (err: any) {
+        console.error("Start Live Transcription Failed:", err);
+        onError(err.message || "Failed to start microphone");
+    }
+};
+
+/**
+ * 停止实时语音转写
+ */
+export const stopLiveTranscription = () => {
+    if (scriptProcessor) {
+        scriptProcessor.disconnect();
+        scriptProcessor = null;
+    }
+    if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+    }
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+    }
+    if (socket) {
+        if (socket.readyState === WebSocket.OPEN) {
+            // Send End Frame
+            socket.send(JSON.stringify({
+                data: {
+                    status: 2,
+                    format: "audio/L16;rate=16000",
+                    encoding: "raw",
+                    audio: ""
+                }
+            }));
+            socket.close();
+        }
+        socket = null;
+    }
+};
+
+/**
+ * 遗留方法：调用讯飞语音听写接口 (Blob 模式)
+ * 保留以兼容旧代码，但建议迁移到 startLiveTranscription
+ */
+export const transcribeAudio = async (
+    audioBlob: Blob,
+    onProgress?: (text: string) => void
+): Promise<string> => {
     if (!APPID || !API_SECRET || !API_KEY) {
         throw new Error("请在 index.html 或环境变量中配置讯飞 APPID, API_SECRET 和 API_KEY");
     }
@@ -92,17 +268,14 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
         let resultText = "";
 
         socket.onopen = () => {
-            // 发送第一帧 (包含参数)
             const params = {
-                common: {
-                    app_id: APPID,
-                },
+                common: { app_id: APPID },
                 business: {
                     language: "zh_cn",
                     domain: "iat",
                     accent: "mandarin",
                     vad_eos: 5000,
-                    dwa: "wpgs" // 动态修正
+                    dwa: "wpgs"
                 },
                 data: {
                     status: 0,
@@ -112,9 +285,8 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
             };
             socket.send(JSON.stringify(params));
 
-            // 分块发送音频数据 (每帧 1280 字节推荐，约 40ms)
             const buffer = new Uint8Array(pcmData);
-            const chunkSize = 1280;
+            const chunkSize = 1280; 
             let offset = 0;
 
             const sendLoop = setInterval(() => {
@@ -126,9 +298,6 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
                 const end = Math.min(offset + chunkSize, buffer.length);
                 const isLast = end === buffer.length;
                 
-                // 将 ArrayBuffer 切片转为 Base64
-                // 注意：buffer.slice 返回的是 ArrayBuffer，需要转为 Uint8Array 才能给 apply 使用 (如果使用 String.fromCharCode)
-                // 这里我们直接手动处理或者使用 arrayBufferToBinaryString
                 let binary = '';
                 const bytes = buffer.subarray(offset, end);
                 const len = bytes.byteLength;
@@ -170,9 +339,11 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
                     });
                 });
                 
-                // 处理 pgws 动态修正：如果 result.pgs == 'rpl'，需要替换之前的文本，这里简单处理，直接拼接
-                // 更好的做法是维护一个结果列表，但这对于一次性文件转写通常够用，因为我们拿到的是最终流
                 resultText += text;
+                
+                if (onProgress) {
+                    onProgress(resultText);
+                }
 
                 if (response.data.status === 2) {
                     socket.close();
@@ -187,8 +358,7 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
 
         socket.onclose = (e) => {
             if (!resultText && e.code !== 1000) {
-               // 如果没有结果且异常关闭
-               // resolve(resultText); // 或者 reject，视情况而定
+               // handle abnormal close
             }
         };
     });

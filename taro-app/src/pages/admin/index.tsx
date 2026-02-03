@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { View as TaroView, Text as TaroText, Button as TaroButton, Input as TaroInput, ScrollView as TaroScrollView } from '@tarojs/components';
+import { View as TaroView, Text as TaroText, Button as TaroButton, Input as TaroInput, ScrollView as TaroScrollView, Picker as TaroPicker } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import { getStorageData, updateSettings, addUser, deleteUser, addField, deleteField, saveStorageData, syncFromSupabase } from '../../services/storage';
 import { User, CustomFieldDefinition, MySQLConfig, SupabaseConfig } from '../../types';
@@ -11,6 +11,12 @@ const Text = TaroText as any;
 const Button = TaroButton as any;
 const Input = TaroInput as any;
 const ScrollView = TaroScrollView as any;
+const Picker = TaroPicker as any;
+
+const TARGET_OPTIONS = ['Client', 'Visit', 'User'];
+const TARGET_LABELS = ['客户 (Client)', '拜访 (Visit)', '用户 (User)'];
+const TYPE_OPTIONS = ['text', 'number', 'date'];
+const TYPE_LABELS = ['文本 (Text)', '数值 (Number)', '日期 (Date)'];
 
 const AdminPage = () => {
   const [data, setData] = useState(getStorageData());
@@ -27,6 +33,8 @@ const AdminPage = () => {
 
   // New Field Inputs
   const [newFieldLabel, setNewFieldLabel] = useState('');
+  const [newFieldTargetIdx, setNewFieldTargetIdx] = useState(1); // Default to Visit
+  const [newFieldTypeIdx, setNewFieldTypeIdx] = useState(0); // Default to text
 
   // Storage
   const [mysqlConfig, setMysqlConfig] = useState<MySQLConfig>({ host: '', port: '3306', username: '', password: '', database: '' });
@@ -59,15 +67,7 @@ const AdminPage = () => {
       Taro.showToast({ title: '配置已保存', icon: 'success' });
   };
 
-  const saveStorageConfig = () => {
-      // Determine mode based on active inputs (heuristic)
-      // but strictly we just save the configs here. Mode switch is in the buttons.
-      updateSettings({ mysqlConfig, supabaseConfig });
-      Taro.showToast({ title: '存储配置保存', icon: 'success' });
-  };
-
   const handleBackup = () => {
-      // Export full JSON to clipboard
       const json = JSON.stringify(data);
       Taro.setClipboardData({
           data: json,
@@ -87,7 +87,7 @@ const AdminPage = () => {
                   try {
                       const d = JSON.parse(r.content);
                       if (d.clients && d.visits) {
-                          saveStorageData(d); // Full overwrite
+                          saveStorageData(d);
                           refresh();
                           Taro.showToast({ title: '恢复成功', icon: 'success' });
                       } else {
@@ -120,12 +120,15 @@ const AdminPage = () => {
   };
 
   const handleAddField = () => {
-      if(!newFieldLabel) return;
+      if(!newFieldLabel) {
+          Taro.showToast({ title: '请输入字段名称', icon: 'none' });
+          return;
+      }
       addField({
           id: Date.now().toString(),
-          target: 'Visit',
+          target: TARGET_OPTIONS[newFieldTargetIdx] as any,
           label: newFieldLabel,
-          type: 'text'
+          type: TYPE_OPTIONS[newFieldTypeIdx] as any
       });
       setNewFieldLabel('');
       refresh();
@@ -195,17 +198,45 @@ const AdminPage = () => {
         {activeTab === 'FIELDS' && (
             <View>
                 <View className="bg-white p-4 rounded-xl shadow-sm mb-4">
-                     <Text className="section-title">新增拜访字段</Text>
-                     <View className="flex gap-2">
-                         <Input className="input-field flex-1" placeholder="字段名称" value={newFieldLabel} onInput={e => setNewFieldLabel(e.detail.value)} />
-                         <Button className="bg-indigo-600 text-white text-xs w-20 flex items-center justify-center m-0" onClick={handleAddField}>添加</Button>
+                     <Text className="section-title">新增动态字段</Text>
+                     
+                     <View className="mb-3">
+                         <Text className="text-xs text-gray-500 mb-1">字段名称</Text>
+                         <Input className="input-field" placeholder="如：职位、预算范围" value={newFieldLabel} onInput={e => setNewFieldLabel(e.detail.value)} />
                      </View>
+
+                     <View className="flex gap-2 mb-3">
+                         <View className="flex-1">
+                             <Text className="text-xs text-gray-500 mb-1">应用对象</Text>
+                             <Picker range={TARGET_LABELS} value={newFieldTargetIdx} onChange={e => setNewFieldTargetIdx(Number(e.detail.value))}>
+                                 <View className="input-field flex justify-between items-center">
+                                     <Text>{TARGET_LABELS[newFieldTargetIdx]}</Text>
+                                     <Text>▼</Text>
+                                 </View>
+                             </Picker>
+                         </View>
+                         <View className="flex-1">
+                             <Text className="text-xs text-gray-500 mb-1">数据类型</Text>
+                             <Picker range={TYPE_LABELS} value={newFieldTypeIdx} onChange={e => setNewFieldTypeIdx(Number(e.detail.value))}>
+                                 <View className="input-field flex justify-between items-center">
+                                     <Text>{TYPE_LABELS[newFieldTypeIdx]}</Text>
+                                     <Text>▼</Text>
+                                 </View>
+                             </Picker>
+                         </View>
+                     </View>
+
+                     <Button className="bg-indigo-600 text-white text-xs w-full py-2" onClick={handleAddField}>立即添加</Button>
                  </View>
+
                  {data.fieldDefinitions.map(f => (
                      <View key={f.id} className="bg-white p-4 rounded-xl shadow-sm mb-2 flex justify-between items-center">
                          <View>
                              <Text className="font-bold text-gray-900 block">{f.label}</Text>
-                             <Text className="text-xs text-gray-400">Target: {f.target} | Type: {f.type}</Text>
+                             <View className="flex space-x-2 mt-1">
+                                 <Text className="text-[10px] bg-gray-100 text-gray-500 px-1 rounded">{f.target}</Text>
+                                 <Text className="text-[10px] bg-gray-100 text-gray-500 px-1 rounded">{f.type}</Text>
+                             </View>
                          </View>
                          <Text className="text-red-500 text-xs p-2" onClick={() => { deleteField(f.id); refresh(); }}>删除</Text>
                      </View>
@@ -228,7 +259,7 @@ const AdminPage = () => {
                     <Text className="section-title text-green-700">Supabase 后端 (BaaS)</Text>
                     <View className="bg-green-50 p-3 rounded mb-3">
                         <Text className="text-xs text-green-800 leading-relaxed">
-                            切换到 Supabase 模式后，数据将实时同步到云端数据库。请确保已在 Supabase 后台执行建表 SQL。
+                            切换到 Supabase 模式后，数据将实时同步到云端数据库。
                         </Text>
                     </View>
                     <Input className="input-field mb-2" placeholder="Project URL (https://xyz.supabase.co)" value={supabaseConfig.url} onInput={e => setSupabaseConfig({...supabaseConfig, url: e.detail.value})} />
@@ -243,34 +274,6 @@ const AdminPage = () => {
                          </Button>
                          <Button className="flex-1 bg-blue-600 text-white m-0 text-xs py-2" onClick={handleSyncSupabase}>立即同步云端数据</Button>
                     </View>
-                </View>
-
-                {/* Legacy / Local Options */}
-                <View className="bg-white p-4 rounded-xl shadow-sm">
-                    <Text className="section-title">其他存储选项</Text>
-                    
-                    <View className="flex gap-3 mb-4">
-                        <Button
-                            className={`flex-1 m-0 text-xs py-2 ${data.settings.storageMode === 'LOCAL_FILE' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
-                            onClick={() => { updateSettings({ storageMode: 'LOCAL_FILE' }); refresh(); Taro.showToast({title:'已切换至本地模式', icon:'none'}); }}
-                        >
-                            本地存储 (Local)
-                        </Button>
-                        <Button
-                            className={`flex-1 m-0 text-xs py-2 ${data.settings.storageMode === 'MYSQL' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
-                            onClick={() => { updateSettings({ storageMode: 'MYSQL', mysqlConfig }); refresh(); Taro.showToast({title:'已切换至 MySQL (模拟)', icon:'none'}); }}
-                        >
-                            MySQL (模拟)
-                        </Button>
-                    </View>
-
-                    {data.settings.storageMode === 'MYSQL' && (
-                        <View className="opacity-50 pointer-events-none">
-                            <Input className="input-field mb-2" placeholder="Host" value={mysqlConfig.host} onInput={e => setMysqlConfig({...mysqlConfig, host: e.detail.value})} />
-                            <Input className="input-field mb-2" placeholder="Database" value={mysqlConfig.database} onInput={e => setMysqlConfig({...mysqlConfig, database: e.detail.value})} />
-                            <Button className="bg-gray-300 text-white mt-2 text-xs w-full">保存 (仅演示)</Button>
-                        </View>
-                    )}
                 </View>
             </View>
         )}

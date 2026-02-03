@@ -32,6 +32,7 @@ const VisitPage = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [selectedClientIdx, setSelectedClientIdx] = useState<number>(-1);
+  const [clientPosition, setClientPosition] = useState<string>(''); // Added for read-only position
   
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [category, setCategory] = useState('Outbound');
@@ -57,11 +58,15 @@ const VisitPage = () => {
   // Settings Temp State
   const [tempDeepSeekKey, setTempDeepSeekKey] = useState('');
   const [tempEmailConfig, setTempEmailConfig] = useState<any>({});
+  
+  // Field Definitions (Global)
+  const [allFieldDefs, setAllFieldDefs] = useState<CustomFieldDefinition[]>([]);
 
   const loadData = () => {
     const data = getStorageData();
     setVisits(data.visits.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
     setClients(data.clients);
+    setAllFieldDefs(data.fieldDefinitions);
     setCustomFields(data.fieldDefinitions.filter(f => f.target === 'Visit'));
     setActiveModel(data.settings.aiConfig?.activeModel || 'Gemini');
     setTempDeepSeekKey(data.settings.aiConfig?.deepSeekApiKey || '');
@@ -75,9 +80,27 @@ const VisitPage = () => {
     }
   });
 
+  // Extract client position whenever selectedClientIdx changes
+  useEffect(() => {
+    if (selectedClientIdx >= 0 && clients[selectedClientIdx]) {
+        const client = clients[selectedClientIdx];
+        // Look for field named "职位" or "Position" in global defs
+        const posDef = allFieldDefs.find(f => f.target === 'Client' && (f.label.includes('职位') || f.label.toLowerCase().includes('position')));
+        if (posDef && client.customFields) {
+            const fieldVal = client.customFields.find(cf => cf.fieldId === posDef.id)?.value;
+            setClientPosition(fieldVal || '未录入');
+        } else {
+            setClientPosition('未配置职位字段');
+        }
+    } else {
+        setClientPosition('');
+    }
+  }, [selectedClientIdx, clients, allFieldDefs]);
+
   const openEdit = (visitId?: string) => {
       setEditingId(visitId || null);
       setAiResult(null);
+      setClientPosition('');
       
       if (visitId) {
           const v = visits.find(v => v.id === visitId);
@@ -170,18 +193,23 @@ const VisitPage = () => {
           setIsRecording(false);
           setRecordDuration(0);
           try {
-              Taro.showLoading({ title: '处理录音...' });
+              Taro.showLoading({ title: '保存录音...' });
               const res = await nativeRecorder.stop();
               Taro.hideLoading();
               
-              const newAtt: Attachment = {
-                  id: Date.now().toString(),
-                  name: `语音 ${new Date().toLocaleTimeString()}`,
-                  type: 'document',
-                  url: `data:audio/mp3;base64,${res.base64Data}`
-              };
-              setAttachments([...attachments, newAtt]);
-              setNotes(prev => prev + `\n[录音 ${Math.round(res.duration/1000)}s]`);
+              if (res.base64Data) {
+                  const newAtt: Attachment = {
+                      id: Date.now().toString(),
+                      name: `语音 ${new Date().toLocaleTimeString()}`,
+                      type: 'document',
+                      url: `data:audio/mp3;base64,${res.base64Data}`
+                  };
+                  setAttachments([...attachments, newAtt]);
+                  setNotes(prev => prev + `\n[录音 ${Math.round(res.duration/1000)}s - 已就绪]`);
+                  Taro.showToast({ title: '录音已保存，请点击 AI 分析进行转写', icon: 'none', duration: 3000 });
+              } else {
+                  Taro.showToast({ title: '录音数据为空', icon: 'none' });
+              }
           } catch(e) {
               Taro.hideLoading();
               Taro.showToast({ title: '录音失败', icon: 'none' });
@@ -215,27 +243,46 @@ const VisitPage = () => {
 
   const handleAI = async () => {
       const clientName = selectedClientIdx >= 0 ? clients[selectedClientIdx].name : 'Client';
-      const lastAudio = attachments.filter(a => a.url.startsWith('data:audio')).pop();
+      // Find the last VALID audio attachment (must contain base64)
+      const lastAudio = [...attachments].reverse().find(a => a.url && a.url.startsWith('data:audio'));
       
       if (!notes && !lastAudio) return Taro.showToast({title: '无内容可分析', icon:'none'});
 
       setIsAnalyzing(true);
-      Taro.showLoading({ title: `${activeModel} 思考中...` });
+      Taro.showLoading({ title: `${activeModel} 正在分析音频/笔记...` });
       
       try {
           let res;
           if (lastAudio && activeModel === 'Gemini') {
-               const b64 = lastAudio.url.split(',')[1];
-               res = await analyzeVisitAudio(clientName, b64);
+               // Robustly extracting base64
+               const parts = lastAudio.url.split(',');
+               if (parts.length === 2) {
+                   const b64 = parts[1];
+                   res = await analyzeVisitAudio(clientName, b64);
+               } else {
+                   // Fallback to text analysis if audio is invalid
+                   res = await analyzeVisitNotes(clientName, notes);
+               }
           } else {
                res = await analyzeVisitNotes(clientName, notes);
           }
+          
           setAiResult(res);
-          if (res.transcription) setNotes(prev => prev + "\n\n[转写]: " + res.transcription);
+          
+          // CRITICAL FIX: Ensure transcription is appended to notes clearly
+          if (res.transcription) {
+              setNotes(prev => {
+                  // Avoid duplicating transcription if already present
+                  if (prev.includes(res.transcription)) return prev;
+                  return (prev ? prev + "\n\n" : "") + "【AI 转写】:\n" + res.transcription;
+              });
+          }
+          
           Taro.hideLoading();
       } catch (e: any) {
           Taro.hideLoading();
-          Taro.showModal({ title: 'AI 错误', content: e.message, showCancel: false });
+          console.error(e);
+          Taro.showModal({ title: 'AI 错误', content: e.message || '未知错误', showCancel: false });
       } finally {
           setIsAnalyzing(false);
       }
@@ -368,6 +415,14 @@ const VisitPage = () => {
                       </View>
                   </Picker>
                   
+                  {/* Read-only Position Field */}
+                  {selectedClientIdx >= 0 && (
+                      <View className="flex justify-between py-3 border-b border-gray-50 bg-gray-50/50 px-2 rounded">
+                          <Text className="text-gray-500 text-sm">客户职位</Text>
+                          <Text className="text-gray-700 font-medium text-sm">{clientPosition || '未录入'}</Text>
+                      </View>
+                  )}
+                  
                   <Picker mode="date" value={date} onChange={e => setDate(e.detail.value)}>
                       <View className="flex justify-between py-3 border-b border-gray-50">
                           <Text className="text-gray-600">日期</Text>
@@ -419,7 +474,7 @@ const VisitPage = () => {
                               <Text className="text-xs font-bold">{isRecording ? `停止 ${recordDuration}s` : '录音'}</Text>
                           </View>
                           <View onClick={handleAI} className="bg-indigo-600 px-3 py-1 rounded-full shadow-md shadow-indigo-200">
-                               <Text className="text-xs font-bold text-white">{isAnalyzing ? '...' : 'AI 分析'}</Text>
+                               <Text className="text-xs font-bold text-white">{isAnalyzing ? '...' : 'AI 分析 & 转写'}</Text>
                           </View>
                       </View>
                   </View>

@@ -1,8 +1,13 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { Visit, Client, AIAnalysisResult, CustomFieldDefinition, Attachment, CustomFieldData, StorageSettings, EmailConfig, AIModelProvider, VisitCategory } from '../types';
+import { Visit, Client, CustomFieldDefinition, StorageSettings, Attachment, AIAnalysisResult, CustomFieldData, VisitCategory, AIModelProvider } from '../types';
 import { analyzeVisitNotes, analyzeVisitAudio } from '../services/geminiService';
-import { transcribeAudio } from '../services/iflytekService';
-import { Sparkles, Calendar, CheckCircle, Clock, FileText, Send, ChevronRight, ChevronLeft, Loader2, Copy, LayoutList, Calendar as CalendarIcon, Mic, Square, StopCircle, Paperclip, Image as ImageIcon, File, Pencil, Trash2, Headphones, Plus, AlertCircle, Search, Filter, X, Play, Pause, History, Maximize2, Minimize2, ChevronsUpDown, Save, Mail, Settings, Server, BrainCircuit, Key, Users, Volume2, MapPin, Home, Info, Lock, User as UserIcon } from 'lucide-react';
+import { startLiveTranscription, stopLiveTranscription, isSpeechRecognitionSupported } from '../services/webSpeechService';
+import { 
+  Mic, Square, Play, Pause, Paperclip, X, Loader2, Sparkles, 
+  Calendar, User, AlertCircle, Save, Trash2, ChevronLeft, 
+  Clock, FileText, ImageIcon, Headphones, MoreHorizontal, Plus, Briefcase, Settings, Check, Key
+} from 'lucide-react';
 
 interface VisitManagerProps {
   clients: Client[];
@@ -12,851 +17,695 @@ interface VisitManagerProps {
   onDeleteVisit: (id: string) => void;
   onUpdateClient: (client: Client) => void;
   fieldDefinitions: CustomFieldDefinition[];
-  initialEditingVisitId?: string | null;
-  onClearInitialEditingVisitId?: () => void;
+  initialEditingVisitId: string | null;
+  onClearInitialEditingVisitId: () => void;
   currentUserId: string;
   storageSettings: StorageSettings;
   onUpdateStorageSettings: (settings: StorageSettings) => void;
 }
 
-const DRAFT_KEY = 'visit_pro_form_draft';
-
-interface DraftData {
-  editingVisitId: string | null;
-  selectedClientId: string;
-  visitClientName: string;
-  participants: string;
-  date: string;
-  category: VisitCategory;
-  rawNotes: string;
-  customFieldInputs: Record<string, string>;
-  analysisResult: AIAnalysisResult | null;
-  timestamp: number;
-}
-
-const VisitManager: React.FC<VisitManagerProps> = ({ 
-    clients, 
-    visits, 
-    onAddVisit, 
-    onUpdateVisit, 
-    onDeleteVisit, 
-    onUpdateClient,
-    fieldDefinitions,
-    initialEditingVisitId,
-    onClearInitialEditingVisitId,
-    currentUserId,
-    storageSettings,
-    onUpdateStorageSettings
+const VisitManager: React.FC<VisitManagerProps> = ({
+  clients, visits, onAddVisit, onUpdateVisit, onDeleteVisit, 
+  fieldDefinitions, initialEditingVisitId, onClearInitialEditingVisitId,
+  currentUserId, storageSettings, onUpdateStorageSettings
 }) => {
-  const [view, setView] = useState<'LIST' | 'CREATE' | 'CALENDAR'>('LIST');
-  const [editingVisitId, setEditingVisitId] = useState<string | null>(null);
+  const [view, setView] = useState<'LIST' | 'EDIT'>('LIST');
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterOutcome, setFilterOutcome] = useState<string>('ALL');
-  const [filterStartDate, setFilterStartDate] = useState('');
-  const [filterEndDate, setFilterEndDate] = useState('');
-  const [calendarDate, setCalendarDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState(new Date());
-
-  // Form State
-  const [selectedClientId, setSelectedClientId] = useState('');
-  const [visitClientName, setVisitClientName] = useState('');
-  const [participants, setParticipants] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // Edit Form State
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [clientPosition, setClientPosition] = useState<string>(''); // Read-only position
+  
+  const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
   const [category, setCategory] = useState<VisitCategory>('Outbound');
+  const [summary, setSummary] = useState('');
   const [rawNotes, setRawNotes] = useState('');
-  const [customFieldInputs, setCustomFieldInputs] = useState<Record<string, string>>({});
+  const [participants, setParticipants] = useState('');
+  const [outcome, setOutcome] = useState<'Positive' | 'Neutral' | 'Negative' | 'Pending'>('Pending');
+  const [actionItems, setActionItems] = useState<string[]>([]);
+  const [sentimentScore, setSentimentScore] = useState<number>(50);
+  const [followUpEmailDraft, setFollowUpEmailDraft] = useState('');
+  const [customFieldsValues, setCustomFieldsValues] = useState<Record<string, string>>({});
   const [existingAttachments, setExistingAttachments] = useState<Attachment[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [fullScreenField, setFullScreenField] = useState<'notes' | 'summary' | null>(null);
-  const [expandedSections, setExpandedSections] = useState<{ notes: boolean; summary: boolean }>({ notes: false, summary: false });
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
-  const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null);
+  
+  // Interaction State
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showAIConfig, setShowAIConfig] = useState(false);
+  
+  // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<number | null>(null);
-  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-  const [draftData, setDraftData] = useState<DraftData | null>(null);
-  const [missingClientEmail, setMissingClientEmail] = useState('');
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
-  const [isEmailSettingsOpen, setIsEmailSettingsOpen] = useState(false);
-  const [tempEmailConfig, setTempEmailConfig] = useState<EmailConfig>(storageSettings.emailConfig);
-  const [isAIConfigOpen, setIsAIConfigOpen] = useState(false);
-  const [activeModel, setActiveModel] = useState<AIModelProvider>(storageSettings.aiConfig?.activeModel || 'Gemini');
-  // Local state for model selection within the modal before saving
-  const [modalActiveModel, setModalActiveModel] = useState<AIModelProvider>(activeModel);
-
-  const visitDefinitions = fieldDefinitions.filter(d => d.target === 'Visit');
-  const latestAudio = existingAttachments.filter(a => a.name.startsWith('语音录音_')).sort((a, b) => b.name.localeCompare(a.name))[0];
-
-  const filteredVisits = visits.filter(visit => {
-    const matchesSearch = visit.clientName.toLowerCase().includes(searchTerm.toLowerCase()) || visit.summary.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesOutcome = filterOutcome === 'ALL' || visit.outcome === filterOutcome;
-    const visitDateStr = new Date(visit.date).toISOString().split('T')[0];
-    const matchesStartDate = !filterStartDate || visitDateStr >= filterStartDate;
-    const matchesEndDate = !filterEndDate || visitDateStr <= filterEndDate;
-    return matchesSearch && matchesOutcome && matchesStartDate && matchesEndDate;
-  });
-
-  useEffect(() => {
-    if (view === 'CREATE' && hasUnsavedChanges) {
-        const timer = setTimeout(() => {
-            const dataToSave: DraftData = { editingVisitId, selectedClientId, visitClientName, participants, date, category, rawNotes, customFieldInputs, analysisResult, timestamp: Date.now() };
-            localStorage.setItem(DRAFT_KEY, JSON.stringify(dataToSave));
-        }, 1000);
-        return () => clearTimeout(timer);
-    }
-  }, [view, hasUnsavedChanges, editingVisitId, selectedClientId, visitClientName, participants, date, category, rawNotes, customFieldInputs, analysisResult]);
-
-  useEffect(() => {
-    if (view === 'CREATE') {
-        const savedDraft = localStorage.getItem(DRAFT_KEY);
-        if (savedDraft) {
-            try {
-                const parsed: DraftData = JSON.parse(savedDraft);
-                if (parsed.editingVisitId === editingVisitId && !hasUnsavedChanges && (parsed.rawNotes || parsed.selectedClientId)) {
-                    setDraftData(parsed);
-                }
-            } catch (e) { console.error("Failed to parse draft", e); }
-        }
-    } else { setDraftData(null); }
-  }, [view, editingVisitId]); 
-
-  useEffect(() => { if (isEmailSettingsOpen) setTempEmailConfig(storageSettings.emailConfig); }, [isEmailSettingsOpen, storageSettings.emailConfig]);
-
-  useEffect(() => {
-      // Sync local state with global storage settings when they change or modal opens
-      if (storageSettings.aiConfig) {
-          setActiveModel(storageSettings.aiConfig.activeModel);
-          setModalActiveModel(storageSettings.aiConfig.activeModel);
-      }
-  }, [storageSettings.aiConfig, isAIConfigOpen]);
-
-  const handleRestoreDraft = () => {
-    if (!draftData) return;
-    setEditingVisitId(draftData.editingVisitId);
-    setSelectedClientId(draftData.selectedClientId);
-    setVisitClientName(draftData.visitClientName);
-    setParticipants(draftData.participants || '');
-    setDate(draftData.date);
-    setCategory(draftData.category || 'Outbound');
-    setRawNotes(draftData.rawNotes);
-    setCustomFieldInputs(draftData.customFieldInputs);
-    setAnalysisResult(draftData.analysisResult);
-    setHasUnsavedChanges(true); 
-    setDraftData(null);
-  };
-
-  const startEdit = (visit: Visit) => {
-    setEditingVisitId(visit.id);
-    setSelectedClientId(visit.clientId);
-    setVisitClientName(visit.clientName);
-    setParticipants(visit.participants || '');
-    setDate(visit.date.split('T')[0]);
-    setCategory(visit.category || 'Outbound');
-    setRawNotes(visit.rawNotes);
-    setExistingAttachments(visit.attachments || []);
-    setAnalysisResult({
-      summary: visit.summary,
-      sentiment: visit.outcome === 'Pending' ? 'Neutral' : visit.outcome,
-      painPoints: visit.customFields?.find(f => f.fieldId === 'painPoints')?.value?.split(',') || [],
-      actionItems: visit.actionItems,
-      followUpEmailDraft: visit.followUpEmailDraft || ''
-    });
-    const inputs: Record<string, string> = {};
-    visit.customFields?.forEach(f => inputs[f.fieldId] = f.value);
-    setCustomFieldInputs(inputs);
-    setHasUnsavedChanges(false);
-    setView('CREATE');
-  };
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const notesBeforeRecordingRef = useRef<string>('');
+  const tempTranscriptRef = useRef<string>('');
 
   useEffect(() => {
     if (initialEditingVisitId) {
-        const visit = visits.find(v => v.id === initialEditingVisitId);
-        if (visit) startEdit(visit);
-        if (onClearInitialEditingVisitId) onClearInitialEditingVisitId();
+      handleEditVisit(initialEditingVisitId);
+      onClearInitialEditingVisitId();
     }
-  }, [initialEditingVisitId, visits, onClearInitialEditingVisitId]);
+  }, [initialEditingVisitId]);
 
+  // Update read-only position when client is selected
   useEffect(() => {
-    if (isRecording) {
-      timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000);
+    if (selectedClientId) {
+        const client = clients.find(c => c.id === selectedClientId);
+        if (client) {
+            // Try to find a field labeled '职位' or 'Position' in the client definition
+            const positionFieldDef = fieldDefinitions.find(f => 
+                f.target === 'Client' && (f.label.includes('职位') || f.label.toLowerCase().includes('position'))
+            );
+            
+            if (positionFieldDef) {
+                const val = client.customFields?.find(cf => cf.fieldId === positionFieldDef.id)?.value;
+                setClientPosition(val || '未录入');
+            } else {
+                setClientPosition('未配置职位字段');
+            }
+        }
     } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setRecordingTime(0);
+        setClientPosition('');
     }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isRecording]);
+  }, [selectedClientId, clients, fieldDefinitions]);
 
-  const handleAnalyze = async () => {
-    if (!rawNotes.trim() || !selectedClientId) return;
-    const client = clients.find(c => c.id === selectedClientId);
-    if (!client) return;
+  const handleEditVisit = (id: string) => {
+    const visit = visits.find(v => v.id === id);
+    if (visit) {
+      setEditingId(visit.id);
+      setSelectedClientId(visit.clientId);
+      setDate(new Date(visit.date).toISOString().split('T')[0]);
+      setCategory(visit.category);
+      setSummary(visit.summary);
+      setRawNotes(visit.rawNotes);
+      setParticipants(visit.participants || '');
+      setOutcome(visit.outcome);
+      setActionItems(visit.actionItems || []);
+      setSentimentScore(visit.sentimentScore);
+      setFollowUpEmailDraft(visit.followUpEmailDraft || '');
+      setExistingAttachments(visit.attachments || []);
+      
+      const cf: Record<string, string> = {};
+      visit.customFields?.forEach(f => {
+        cf[f.fieldId] = f.value;
+      });
+      setCustomFieldsValues(cf);
+      
+      setView('EDIT');
+      setHasUnsavedChanges(false);
+    }
+  };
+
+  const handleCreateVisit = () => {
+    setEditingId(null);
+    setSelectedClientId('');
+    setDate(new Date().toISOString().split('T')[0]);
+    setCategory('Outbound');
+    setSummary('');
+    setRawNotes('');
+    setParticipants('');
+    setOutcome('Pending');
+    setActionItems([]);
+    setSentimentScore(50);
+    setFollowUpEmailDraft('');
+    setExistingAttachments([]);
+    setCustomFieldsValues({});
     
-    // Check if DeepSeek is selected and env var is missing (process.env check logic should ideally be here or in service)
-    // Here we rely on the service throwing an error if the key is missing
-
-    setIsAnalyzing(true);
-    try {
-      const result = await analyzeVisitNotes(client.name, client.industry || '', rawNotes, activeModel);
-      setAnalysisResult(result);
-      setHasUnsavedChanges(true);
-    } catch (e: any) { alert(e.message || "分析失败"); } finally { setIsAnalyzing(false); }
+    setView('EDIT');
+    setHasUnsavedChanges(false);
   };
 
   const startRecording = async () => {
-    if (!selectedClientId) { alert("请先选择客户"); return; }
-    setTranscriptionError(null);
+    if (!isSpeechRecognitionSupported()) {
+      alert("您的浏览器不支持语音识别，请使用 Chrome 或 Edge 浏览器。");
+      return;
+    }
+
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const hasMic = devices.some(device => device.kind === 'audioinput');
-      if (!hasMic) { 
-          setTranscriptionError("未检测到麦克风，请检查设备连接。"); 
-          return; 
-      }
+      // 1. Start Audio Recording (for File Attachment)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-      mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunksRef.current.push(event.data); };
-      
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
       mediaRecorder.onstop = async () => {
-         const mimeType = mediaRecorder.mimeType;
+         const mimeType = mediaRecorder.mimeType || 'audio/webm';
          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-         
          stream.getTracks().forEach(track => track.stop());
 
          const reader = new FileReader();
          reader.readAsDataURL(audioBlob);
          reader.onloadend = async () => {
             const base64Url = reader.result as string;
-            const base64Data = base64Url.split(',')[1];
-            
             const newAttachment: Attachment = { id: crypto.randomUUID(), name: `语音录音_${Date.now()}.webm`, type: 'document', url: base64Url };
             setExistingAttachments(prev => [...prev, newAttachment]);
             setHasUnsavedChanges(true);
-            
-            setIsTranscribing(true);
-            setTranscriptionError(null);
-            try {
-                let text = '';
-                // Use Gemini Audio Analysis if active model is Gemini
-                if (activeModel === 'Gemini') {
-                     const client = clients.find(c => c.id === selectedClientId);
-                     const cName = visitClientName || client?.name || 'Client';
-                     
-                     // Call analyzeVisitAudio directly
-                     const result = await analyzeVisitAudio(cName, base64Data, mimeType);
-                     setAnalysisResult(result); // Set full analysis
-                     text = result.transcription || '';
-                } else {
-                     // Fallback to iFlytek transcription if DeepSeek is active
-                     text = await transcribeAudio(audioBlob);
-                }
-
-                if (text) {
-                     setRawNotes(prev => {
-                        const timestamp = new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute:'2-digit'});
-                        return prev ? `${prev}\n\n[语音转写 ${timestamp}]\n${text}` : text;
-                     });
-                     setHasUnsavedChanges(true);
-                }
-            } catch (error: any) { 
-                console.error("Transcription/Analysis error:", error);
-                let msg = error.message || "未知错误";
-                
-                // Friendly error messages
-                if (msg.includes("400") || msg.includes("INVALID_ARGUMENT") || msg.includes("mime")) {
-                    msg = `音频格式不支持 (${mimeType})。请尝试使用 Chrome 桌面版录制。`;
-                } else if (msg.includes("API Key")) {
-                    msg = "AI 服务连接失败：请检查 API Key 配置。";
-                } else if (msg.includes("Network") || msg.includes("fetch")) {
-                    msg = "网络连接异常，无法上传音频。";
-                }
-                
-                setTranscriptionError(`处理失败: ${msg}`);
-            } finally { 
-                setIsTranscribing(false); 
-            }
         };
       };
-      
       mediaRecorder.start();
+      
+      // 2. Start Live Transcription (Web Speech API)
+      notesBeforeRecordingRef.current = rawNotes;
+      tempTranscriptRef.current = '';
+      
+      startLiveTranscription(
+        (text, isFinal) => {
+            const newContent = notesBeforeRecordingRef.current 
+                  ? `${notesBeforeRecordingRef.current}\n\n[实时转写]: ${text}`
+                  : `[实时转写]: ${text}`;
+            setRawNotes(newContent);
+            setHasUnsavedChanges(true);
+        },
+        (err) => {
+          setTranscriptionError(err);
+        },
+        () => {
+          setIsRecording(false);
+        }
+      );
+
       setIsRecording(true);
-    } catch (err: any) { 
-        console.error(err);
-        setTranscriptionError("无法访问麦克风，请检查浏览器权限设置。"); 
+      setTranscriptionError(null);
+
+    } catch (err: any) {
+      console.error("Error starting recording:", err);
+      setTranscriptionError("无法启动录音: " + err.message);
+    }
+  };
+
+  const stopRecording = () => {
+    // Stop Media Recorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    // Stop Web Speech API
+    stopLiveTranscription();
+    setIsRecording(false);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          const newAttachment: Attachment = {
+            id: Date.now().toString(),
+            name: file.name,
+            type: file.type.startsWith('image/') ? 'image' : 'document',
+            url: event.target.result as string
+          };
+          setExistingAttachments(prev => [...prev, newAttachment]);
+          setHasUnsavedChanges(true);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleAIAnalysis = async () => {
+    if (!selectedClientId) {
+        alert("请先选择客户");
+        return;
+    }
+    const client = clients.find(c => c.id === selectedClientId);
+    if (!client) return;
+
+    const audioAttachment = existingAttachments.slice().reverse().find(a => a.url.startsWith('data:audio') || a.name.includes('语音'));
+    
+    setIsAnalyzing(true);
+    setTranscriptionError(null);
+    
+    try {
+        let result: AIAnalysisResult;
+        
+        // Pass model settings
+        const activeModel = storageSettings.aiConfig.activeModel;
+        const deepSeekKey = storageSettings.aiConfig.deepSeekApiKey;
+
+        if (audioAttachment) {
+            const base64Data = audioAttachment.url.split(',')[1];
+            const mimeType = audioAttachment.url.split(';')[0].split(':')[1];
+            // Audio analysis typically uses Gemini as it has native multimodal support
+            result = await analyzeVisitAudio(client.name, base64Data, mimeType);
+        } else if (rawNotes.trim().length > 0) {
+            result = await analyzeVisitNotes(
+                client.name, 
+                client.industry || '', 
+                rawNotes, 
+                activeModel, // Use configured model
+                'Formal',
+                deepSeekKey // Pass configured key
+            );
+        } else {
+            throw new Error("请先输入笔记或录制语音");
+        }
+
+        if (result.summary) setSummary(result.summary);
+        if (result.sentiment) setOutcome(result.sentiment === 'Positive' ? 'Positive' : result.sentiment === 'Negative' ? 'Negative' : 'Neutral');
+        if (result.actionItems) setActionItems(result.actionItems);
+        if (result.followUpEmailDraft) setFollowUpEmailDraft(result.followUpEmailDraft);
+        
+        // Use AI transcription if it's better/different, but append nicely.
+        if (result.transcription && !rawNotes.includes(result.transcription)) {
+             setRawNotes(prev => (prev ? prev + '\n\n' : '') + `[AI精修]: ${result.transcription}`);
+        }
+        
+        setSentimentScore(result.sentiment === 'Positive' ? 85 : result.sentiment === 'Negative' ? 30 : 60);
+        setHasUnsavedChanges(true);
+    } catch (e: any) {
+        console.error("Analysis failed", e);
+        setTranscriptionError(e.message || "AI 分析失败，请检查配置");
+    } finally {
+        setIsAnalyzing(false);
     }
   };
 
   const handleSave = () => {
-    if (!selectedClientId) { alert("请选择客户"); return; }
-    const client = clients.find(c => c.id === selectedClientId)!;
-    const customFieldsData: CustomFieldData[] = Object.entries(customFieldInputs).map(([fieldId, value]) => ({ fieldId, value: value as string }));
+    if (!selectedClientId) {
+      alert("必须选择客户");
+      return;
+    }
+    const client = clients.find(c => c.id === selectedClientId);
+    if (!client) return;
+
+    const customFieldsData: CustomFieldData[] = Object.entries(customFieldsValues).map(([k, v]) => ({ fieldId: k, value: v }));
+
     const visitData: Visit = {
-      id: editingVisitId || crypto.randomUUID(),
-      userId: editingVisitId ? (visits.find(v => v.id === editingVisitId)?.userId || currentUserId) : currentUserId,
+      id: editingId || crypto.randomUUID(),
       clientId: client.id,
-      clientName: visitClientName || client.name,
-      participants,
+      clientName: client.name,
+      userId: currentUserId,
       date: new Date(date).toISOString(),
       category,
-      rawNotes,
-      summary: analysisResult?.summary || rawNotes || '（暂无摘要）',
-      outcome: analysisResult ? (analysisResult.sentiment as any) : 'Pending',
-      actionItems: analysisResult?.actionItems || [],
-      sentimentScore: analysisResult ? (analysisResult.sentiment === 'Positive' ? 80 : 30) : 50,
-      customFields: customFieldsData,
+      summary: summary || '暂无摘要',
+      rawNotes: rawNotes,
+      participants,
+      outcome,
+      actionItems,
+      sentimentScore,
+      followUpEmailDraft,
       attachments: existingAttachments,
-      followUpEmailDraft: analysisResult?.followUpEmailDraft
+      customFields: customFieldsData
     };
-    if (editingVisitId) onUpdateVisit(visitData); else onAddVisit(visitData);
-    localStorage.removeItem(DRAFT_KEY);
-    resetForm();
-    setView('LIST'); 
+
+    if (editingId) {
+      onUpdateVisit(visitData);
+    } else {
+      onAddVisit(visitData);
+    }
+    setView('LIST');
   };
 
-  const resetForm = () => {
-    setEditingVisitId(null); setSelectedClientId(''); setVisitClientName(''); setParticipants('');
-    setDate(new Date().toISOString().split('T')[0]); setCategory('Outbound'); setRawNotes('');
-    setAnalysisResult(null); setExistingAttachments([]); setHasUnsavedChanges(false);
-    setShowDiscardConfirm(false); setDraftData(null); setFullScreenField(null);
-    setTranscriptionError(null);
+  const handleUpdateModel = (model: AIModelProvider) => {
+    onUpdateStorageSettings({
+        ...storageSettings,
+        aiConfig: {
+            ...storageSettings.aiConfig,
+            activeModel: model
+        }
+    });
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  const handleUpdateDeepSeekKey = (key: string) => {
+    onUpdateStorageSettings({
+        ...storageSettings,
+        aiConfig: {
+            ...storageSettings.aiConfig,
+            deepSeekApiKey: key
+        }
+    });
   };
 
-  if (view === 'CREATE') {
-    return (
-      <>
-        <div className="max-w-4xl mx-auto animate-fade-in relative pb-10">
-          <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">{editingVisitId ? '编辑拜访记录' : '记录新拜访'}</h2>
-              <button onClick={() => { if (hasUnsavedChanges) { setShowDiscardConfirm(true); } else { resetForm(); setView('LIST'); } }} className="text-sm text-gray-500 hover:text-gray-900">取消</button>
-          </div>
+  const visitDefinitions = fieldDefinitions.filter(d => d.target === 'Visit');
 
-          {draftData && (
-              <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center justify-between shadow-sm">
-                  <div className="flex items-center space-x-3">
-                      <div className="p-2 bg-amber-100 rounded-full"><History className="w-5 h-5 text-amber-600" /></div>
-                      <div><p className="text-sm font-bold text-gray-800">发现未保存的草稿</p><p className="text-xs text-gray-600">系统检测到您在 {new Date(draftData.timestamp).toLocaleString('zh-CN')} 有未保存的内容。</p></div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                      <button onClick={handleRestoreDraft} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-md transition-colors shadow-sm">恢复草稿</button>
-                      <button onClick={() => { localStorage.removeItem(DRAFT_KEY); setDraftData(null); }} className="px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 text-xs font-bold rounded-md transition-colors">忽略</button>
-                  </div>
-              </div>
-          )}
+  if (view === 'LIST') {
+      const filteredVisits = visits.filter(v => 
+          v.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          v.summary.toLowerCase().includes(searchTerm.toLowerCase())
+      );
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="space-y-6">
-              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">拜访分类</label>
-                    <div className="flex bg-gray-100 p-1 rounded-lg">
-                        <button 
-                            type="button"
-                            onClick={() => { setCategory('Outbound'); setHasUnsavedChanges(true); }}
-                            className={`flex-1 flex items-center justify-center py-2 px-3 rounded-md text-sm font-bold transition-all ${category === 'Outbound' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            <MapPin className="w-4 h-4 mr-2" /> 外出拜访
-                        </button>
-                        <button 
-                            type="button"
-                            onClick={() => { setCategory('Inbound'); setHasUnsavedChanges(true); }}
-                            className={`flex-1 flex items-center justify-center py-2 px-3 rounded-md text-sm font-bold transition-all ${category === 'Inbound' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            <Home className="w-4 h-4 mr-2" /> 客户到访
-                        </button>
-                    </div>
-                </div>
-
-                <label className="block text-sm font-medium text-gray-700 mb-2">选择客户</label>
-                <select className="w-full border border-gray-300 rounded-lg p-2.5 bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={selectedClientId} onChange={(e) => { const id = e.target.value; setSelectedClientId(id); const client = clients.find(c => c.id === id); setVisitClientName(client ? client.name : ''); setHasUnsavedChanges(true); }}>
-                  <option value="">-- 请选择客户 --</option>
-                  {clients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.company})</option>)}
-                </select>
-                
-                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">拜访对象</label>
-                        <input type="text" className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none" value={visitClientName} onChange={(e) => { setVisitClientName(e.target.value); setHasUnsavedChanges(true); }} placeholder="例如：张经理" disabled={!selectedClientId} />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">拜访日期</label>
-                        <input type="date" className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none" value={date} onChange={(e) => { setDate(e.target.value); setHasUnsavedChanges(true); }} />
-                    </div>
-                </div>
-
-                <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center"><Users className="w-4 h-4 mr-2 text-gray-400" />参加人员情况</label>
-                    <input type="text" className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none" value={participants} onChange={(e) => { setParticipants(e.target.value); setHasUnsavedChanges(true); }} placeholder="请输入参会人员姓名、职务等..." disabled={!selectedClientId} />
-                </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col h-auto relative overflow-hidden">
-                <div className="flex justify-between items-center mb-2">
-                   <label className="block text-sm font-medium text-gray-700">原始笔记</label>
-                   <div className="flex items-center space-x-3">
-                      <span className={`text-xs ${rawNotes.length > 500 ? 'text-amber-500 font-medium' : 'text-gray-400'}`}>{rawNotes.length} 字</span>
-                      <button type="button" onClick={() => setExpandedSections(p => ({ ...p, notes: !p.notes }))} className="text-xs text-blue-600 hover:text-blue-700 font-medium">{expandedSections.notes ? '收起' : '展开'}</button>
-                      <button type="button" onClick={() => setFullScreenField('notes')} className="text-gray-400 hover:text-blue-600 transition-colors p-1"><Maximize2 className="w-4 h-4" /></button>
-                   </div>
-                </div>
-                <textarea className="w-full border border-gray-300 rounded-lg p-4 focus:ring-2 focus:ring-blue-500 outline-none resize-none custom-scrollbar transition-all duration-300" style={{ height: expandedSections.notes ? '500px' : '160px' }} placeholder="输入会议核心点，或使用语音录制..." value={rawNotes} onChange={(e) => { setRawNotes(e.target.value); setHasUnsavedChanges(true); }} />
-                
-                {isTranscribing && (
-                    <div className="mt-3 bg-blue-50 rounded-lg p-4 border border-blue-100 flex flex-col space-y-3 animate-fade-in shadow-inner">
-                        <div className="flex items-center justify-between text-blue-700">
-                            <div className="flex items-center space-x-3"><div className="p-2 bg-blue-600 rounded-full animate-pulse"><Loader2 className="w-4 h-4 text-white animate-spin" /></div><span className="text-sm font-bold">AI 正在处理音频并生成摘要...</span></div>
-                        </div>
-                        <div className="relative w-full h-2 bg-blue-100 rounded-full overflow-hidden"><div className="absolute inset-0 bg-blue-600 animate-[shimmer_2s_infinite]"></div></div>
-                    </div>
-                )}
-
-                {isRecording && (
-                    <div className="mt-3 bg-red-50 rounded-lg p-4 border border-red-100 flex items-center justify-between animate-fade-in">
-                        <div className="flex items-center space-x-3 text-red-600"><Volume2 className="w-4 h-4" /><span className="text-sm font-bold">录音中: {formatTime(recordingTime)}</span></div>
-                        <div className="flex items-center space-x-1">{[1,2,3,4,3,2,1].map((s, i) => (<div key={i} className="w-1 bg-red-400 rounded-full animate-pulse" style={{ height: `${s * 4}px` }}></div>))}</div>
-                    </div>
-                )}
-
-                {transcriptionError && (
-                    <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start space-x-3 animate-fade-in">
-                        <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
-                        <div className="flex-1">
-                            <h4 className="text-sm font-bold text-red-800 mb-1">语音处理提示</h4>
-                            <p className="text-xs text-red-700 leading-relaxed">{transcriptionError}</p>
-                        </div>
-                        <button onClick={() => setTranscriptionError(null)} className="text-red-400 hover:text-red-600 p-1">
-                            <X className="w-4 h-4" />
-                        </button>
-                    </div>
-                )}
-
-                <div className="mt-4 flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
-                   <div className="flex items-center space-x-3">
-                      {!isRecording ? (
-                           <>
-                           <button onClick={startRecording} disabled={isAnalyzing || isTranscribing || !selectedClientId} className={`p-3 rounded-full shadow-sm transition-all ${isAnalyzing || isTranscribing || !selectedClientId ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'}`}><Mic className="w-5 h-5" /></button>
-                           {latestAudio && (
-                               <button 
-                                   onClick={() => {
-                                       if (playingAudioId === latestAudio.id) {
-                                           audioPlayerRef.current?.pause();
-                                           setPlayingAudioId(null);
-                                       } else {
-                                           if (audioPlayerRef.current) {
-                                               audioPlayerRef.current.src = latestAudio.url;
-                                               audioPlayerRef.current.play();
-                                               setPlayingAudioId(latestAudio.id);
-                                               audioPlayerRef.current.onended = () => setPlayingAudioId(null);
-                                           }
-                                       }
-                                   }}
-                                   className={`p-3 rounded-full shadow-sm transition-all border ${playingAudioId === latestAudio.id ? 'bg-blue-100 border-blue-200 text-blue-600' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                                   title="播放录音"
-                               >
-                                   {playingAudioId === latestAudio.id ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-                               </button>
-                           )}
-                           </>
-                      ) : (
-                          <button onClick={() => { mediaRecorderRef.current?.stop(); setIsRecording(false); }} className="p-3 rounded-full bg-red-600 text-white animate-pulse shadow-md"><Square className="w-5 h-5 fill-current" /></button>
-                      )}
-                   </div>
-                   <div className="flex items-center space-x-2">
-                      <div className="flex items-center bg-white rounded-lg shadow-sm border border-gray-200 p-1">
-                          <button 
-                             onClick={() => setIsAIConfigOpen(true)}
-                             className="flex items-center space-x-1 px-2 py-1.5 hover:bg-gray-100 rounded text-xs font-bold text-gray-700 transition-colors mr-1"
-                             title="配置 AI 模型"
-                          >
-                              {activeModel === 'Gemini' ? <Sparkles className="w-3.5 h-3.5 text-blue-500" /> : <BrainCircuit className="w-3.5 h-3.5 text-purple-500" />}
-                              <span>{activeModel === 'Gemini' ? 'Gemini' : 'DeepSeek'}</span>
-                          </button>
-                          
-                          <button onClick={handleAnalyze} disabled={!rawNotes || isAnalyzing || isRecording} className={`flex items-center space-x-2 px-3 py-2 rounded-md font-medium text-white text-sm ${!rawNotes || isAnalyzing || isRecording ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                            {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}<span>分析</span>
-                          </button>
+      return (
+          <div className="h-full flex flex-col space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div className="relative w-full sm:w-96">
+                      <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                          <Clock className="w-5 h-5" />
                       </div>
-                   </div>
-                </div>
+                      <input 
+                          type="text" 
+                          placeholder="搜索拜访记录..." 
+                          className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                  </div>
+                  <button 
+                      onClick={handleCreateVisit}
+                      className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium shadow-sm"
+                  >
+                      <Plus className="w-5 h-5" />
+                      <span>记录新拜访</span>
+                  </button>
               </div>
-            </div>
 
-            <div className="space-y-6">
-              {!analysisResult ? (
-                <div className="h-full bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-gray-400 p-8 text-center min-h-[400px]">
-                    <Sparkles className="w-12 h-12 mb-4 opacity-30" />
-                    <p className="text-lg font-medium">等待 AI 见解</p>
-                    <button onClick={handleSave} disabled={!selectedClientId || !rawNotes} className="mt-6 px-6 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-white transition-all disabled:opacity-50"><Save className="w-4 h-4 inline mr-2" />直接保存</button>
-                </div>
-              ) : (
-                <div className="space-y-6 animate-fade-in">
-                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold text-gray-900 flex items-center"><FileText className="w-5 h-5 mr-2 text-blue-600" /> 摘要</h3>
-                    </div>
-                    <textarea className="w-full text-gray-700 leading-relaxed mb-4 p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none resize-none bg-white min-h-[160px]" value={analysisResult.summary} onChange={(e) => { setAnalysisResult({...analysisResult, summary: e.target.value}); setHasUnsavedChanges(true); }} />
-                    <h4 className="font-semibold text-gray-800 mb-2">行动项:</h4>
-                    <ul className="space-y-2">
-                      {analysisResult.actionItems.map((item, idx) => (
-                        <li key={idx} className="flex items-start text-sm text-gray-600">
-                          <CheckCircle className="w-4 h-4 text-green-500 mr-2 mt-0.5 shrink-0" />
-                          <input className="w-full bg-transparent border-none p-0 focus:ring-0" value={item} onChange={(e) => { const items = [...analysisResult.actionItems]; items[idx] = e.target.value; setAnalysisResult({...analysisResult, actionItems: items}); setHasUnsavedChanges(true); }} />
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-bold text-gray-900 flex items-center"><Mail className="w-5 h-5 mr-2 text-indigo-600" /> 邮件草稿</h3>
-                      <button onClick={() => setIsEmailSettingsOpen(true)} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><Settings className="w-4 h-4" /></button>
-                    </div>
-                    <textarea className="w-full bg-gray-50 p-4 rounded-lg border border-gray-100 text-sm text-gray-700 h-40 outline-none mb-4" value={analysisResult.followUpEmailDraft} onChange={(e) => { setAnalysisResult({...analysisResult, followUpEmailDraft: e.target.value}); setHasUnsavedChanges(true); }} />
-                    <button onClick={handleSave} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg shadow-md transition-all flex items-center justify-center space-x-2"><CheckCircle className="w-5 h-5" /><span>保存记录</span></button>
-                  </div>
-                </div>
-              )}
-            </div>
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1 custom-scrollbar">
+                  {filteredVisits.map(visit => (
+                      <div key={visit.id} onClick={() => handleEditVisit(visit.id)} className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group">
+                          <div className="flex justify-between items-start mb-2">
+                              <div>
+                                  <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-600 transition-colors">{visit.clientName}</h3>
+                                  <div className="flex items-center space-x-3 text-xs text-gray-500 mt-1">
+                                      <span className="flex items-center"><Calendar className="w-3 h-3 mr-1" /> {new Date(visit.date).toLocaleDateString('zh-CN')}</span>
+                                      <span className="flex items-center"><User className="w-3 h-3 mr-1" /> {clients.find(c => c.id === visit.clientId)?.company || 'Unknown Company'}</span>
+                                      <span className={`px-1.5 py-0.5 rounded font-bold ${visit.category === 'Inbound' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{visit.category === 'Inbound' ? '来访' : '外出'}</span>
+                                  </div>
+                              </div>
+                              <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                                  visit.outcome === 'Positive' ? 'bg-green-100 text-green-700' : 
+                                  visit.outcome === 'Negative' ? 'bg-red-100 text-red-700' : 
+                                  'bg-gray-100 text-gray-600'
+                              }`}>
+                                  {visit.outcome}
+                              </span>
+                          </div>
+                          <p className="text-gray-600 text-sm line-clamp-2">{visit.summary}</p>
+                      </div>
+                  ))}
+                  {filteredVisits.length === 0 && (
+                      <div className="text-center py-12 text-gray-400">
+                          暂无拜访记录
+                      </div>
+                  )}
+              </div>
           </div>
-        </div>
-
-        {/* Hidden Audio Element */}
-        <audio ref={audioPlayerRef} className="hidden" />
-        
-        {isAIConfigOpen && (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
-                    <div className="bg-gray-900 px-6 py-4 flex justify-between items-center text-white">
-                        <h3 className="text-lg font-bold flex items-center"><BrainCircuit className="w-5 h-5 mr-2 text-indigo-400" /> AI 模型配置</h3>
-                        <button onClick={() => setIsAIConfigOpen(false)}><X className="w-6 h-6" /></button>
-                    </div>
-                    <form onSubmit={(e) => { 
-                        e.preventDefault(); 
-                        onUpdateStorageSettings({
-                            ...storageSettings, 
-                            aiConfig: { 
-                                activeModel: modalActiveModel,
-                                deepSeekApiKey: storageSettings.aiConfig?.deepSeekApiKey || '' // Preserve existing or empty
-                            }
-                        }); 
-                        // Update local state to reflect saved changes
-                        setActiveModel(modalActiveModel);
-                        setIsAIConfigOpen(false); 
-                        alert("AI 模型首选项已更新"); 
-                    }} className="p-6 space-y-4">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-2">选择分析模型</label>
-                            <div className="grid grid-cols-2 gap-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setModalActiveModel('Gemini')}
-                                    className={`p-3 rounded-lg border-2 flex flex-col items-center justify-center transition-all ${modalActiveModel === 'Gemini' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}
-                                >
-                                    <Sparkles className="w-6 h-6 mb-1" />
-                                    <span className="font-bold text-sm">Gemini AI</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModalActiveModel('DeepSeek')}
-                                    className={`p-3 rounded-lg border-2 flex flex-col items-center justify-center transition-all ${modalActiveModel === 'DeepSeek' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}
-                                >
-                                    <BrainCircuit className="w-6 h-6 mb-1" />
-                                    <span className="font-bold text-sm">DeepSeek</span>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="bg-blue-50 text-blue-800 p-3 rounded-lg text-xs flex items-start space-x-2 animate-fade-in">
-                            <Info className="w-4 h-4 mt-0.5 shrink-0" />
-                            <div>
-                                <p className="font-bold mb-1">系统环境配置说明</p>
-                                <p>为确保安全性，{modalActiveModel === 'Gemini' ? 'Gemini' : 'DeepSeek'} API Key 均须通过系统环境变量配置，不再支持前端手动输入。</p>
-                                <ul className="list-disc list-inside mt-1 space-y-0.5 opacity-80">
-                                    <li>Gemini: <code>API_KEY</code></li>
-                                    <li>DeepSeek: <code>DEEPSEEK_API_KEY</code></li>
-                                </ul>
-                            </div>
-                        </div>
-
-                        <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2">保存配置</button>
-                    </form>
-                </div>
-            </div>
-        )}
-
-        {isEmailSettingsOpen && (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
-                    <div className="bg-gray-900 px-6 py-4 flex justify-between items-center text-white">
-                        <h3 className="text-lg font-bold flex items-center"><Server className="w-5 h-5 mr-2 text-indigo-400" /> 邮件服务器配置</h3>
-                        <button onClick={() => setIsEmailSettingsOpen(false)}><X className="w-6 h-6" /></button>
-                    </div>
-                    <form onSubmit={(e) => { e.preventDefault(); onUpdateStorageSettings({...storageSettings, emailConfig: tempEmailConfig}); setIsEmailSettingsOpen(false); alert("设置已更新"); }} className="p-6 space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                             <div className="col-span-2">
-                                 <label className="block text-xs font-bold text-gray-500 mb-1">SMTP 服务器</label>
-                                 <input required className="w-full border border-gray-300 rounded-lg p-2.5 outline-none text-sm" value={tempEmailConfig.smtpHost} onChange={e => setTempEmailConfig({...tempEmailConfig, smtpHost: e.target.value})} placeholder="smtp.example.com" />
-                             </div>
-                             <div>
-                                 <label className="block text-xs font-bold text-gray-500 mb-1">端口</label>
-                                 <input required className="w-full border border-gray-300 rounded-lg p-2.5 outline-none text-sm" value={tempEmailConfig.smtpPort} onChange={e => setTempEmailConfig({...tempEmailConfig, smtpPort: e.target.value})} placeholder="587" />
-                             </div>
-                             <div className="col-span-1">
-                                 <label className="block text-xs font-bold text-gray-500 mb-1">发件人姓名</label>
-                                 <input required className="w-full border border-gray-300 rounded-lg p-2.5 outline-none text-sm" value={tempEmailConfig.senderName} onChange={e => setTempEmailConfig({...tempEmailConfig, senderName: e.target.value})} />
-                             </div>
-                             <div className="col-span-2">
-                                 <label className="block text-xs font-bold text-gray-500 mb-1">发件邮箱</label>
-                                 <input required type="email" className="w-full border border-gray-300 rounded-lg p-2.5 outline-none text-sm" value={tempEmailConfig.senderEmail} onChange={e => setTempEmailConfig({...tempEmailConfig, senderEmail: e.target.value})} />
-                             </div>
-                             
-                             <div className="col-span-2 pt-2">
-                                 <label className="flex items-center space-x-2 cursor-pointer">
-                                     <input type="checkbox" checked={tempEmailConfig.authEnabled} onChange={e => setTempEmailConfig({...tempEmailConfig, authEnabled: e.target.checked})} className="rounded text-indigo-600" />
-                                     <span className="text-sm font-bold text-gray-700">启用身份验证</span>
-                                 </label>
-                             </div>
-
-                             {tempEmailConfig.authEnabled && (
-                                 <>
-                                     <div className="col-span-2 animate-fade-in">
-                                         <label className="block text-xs font-bold text-gray-500 mb-1">用户名 / 账号</label>
-                                         <div className="relative">
-                                             <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                             <input required className="w-full pl-10 border border-gray-300 rounded-lg p-2.5 outline-none text-sm" value={tempEmailConfig.authUsername || ''} onChange={e => setTempEmailConfig({...tempEmailConfig, authUsername: e.target.value})} />
-                                         </div>
-                                     </div>
-                                     <div className="col-span-2 animate-fade-in">
-                                         <label className="block text-xs font-bold text-gray-500 mb-1">密码 / 授权码</label>
-                                         <div className="relative">
-                                             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                             <input required type="password" className="w-full pl-10 border border-gray-300 rounded-lg p-2.5 outline-none text-sm" value={tempEmailConfig.authPassword || ''} onChange={e => setTempEmailConfig({...tempEmailConfig, authPassword: e.target.value})} />
-                                         </div>
-                                     </div>
-                                 </>
-                             )}
-                        </div>
-                        <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-4">保存配置</button>
-                    </form>
-                </div>
-            </div>
-        )}
-
-        {showDiscardConfirm && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden text-center p-6">
-                    <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4"><AlertCircle className="h-6 w-6 text-red-600" /></div>
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">未保存的更改</h3>
-                    <p className="text-sm text-gray-500 mb-6">您有未保存的更改，确定要放弃吗？</p>
-                    <div className="flex space-x-3">
-                        <button onClick={() => setShowDiscardConfirm(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700">继续编辑</button>
-                        <button onClick={() => { localStorage.removeItem(DRAFT_KEY); resetForm(); setView('LIST'); }} className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg">放弃</button>
-                    </div>
-                </div>
-            </div>
-        )}
-
-        {/* New Full Screen Modal */}
-        {fullScreenField === 'notes' && (
-            <div className="fixed inset-0 z-[100] bg-white flex flex-col animate-scale-in">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-blue-100 rounded-lg">
-                            <FileText className="w-5 h-5 text-blue-600" />
-                        </div>
-                        <div>
-                             <h3 className="text-lg font-bold text-gray-900">原始笔记编辑器</h3>
-                             <p className="text-xs text-gray-500">全屏专注模式</p>
-                        </div>
-                    </div>
-                    <div className="flex items-center space-x-4">
-                         <span className="text-xs font-mono text-gray-400 bg-gray-100 px-2 py-1 rounded border border-gray-200">
-                            {rawNotes.length} 字
-                         </span>
-                        <button 
-                            onClick={() => setFullScreenField(null)} 
-                            className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-200 rounded-lg transition-colors"
-                            title="退出全屏"
-                        >
-                            <Minimize2 className="w-6 h-6" />
-                        </button>
-                    </div>
-                </div>
-                <div className="flex-1 p-6 md:p-10 bg-gray-50/50 overflow-hidden flex flex-col">
-                    <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative">
-                        <textarea 
-                            className="flex-1 w-full h-full resize-none outline-none text-lg leading-relaxed text-gray-800 p-8 custom-scrollbar pb-24"
-                            placeholder="在此输入详细会议笔记..."
-                            value={rawNotes}
-                            onChange={(e) => { setRawNotes(e.target.value); setHasUnsavedChanges(true); }}
-                            autoFocus
-                        />
-                        
-                        {(isRecording || isTranscribing) && (
-                            <div className="absolute top-6 right-6 flex flex-col items-end space-y-2 pointer-events-none">
-                                {isRecording && (
-                                    <div className="bg-red-50 text-red-600 px-4 py-2 rounded-full border border-red-100 shadow-sm flex items-center space-x-2 animate-pulse">
-                                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                        <span className="text-xs font-bold">录音中 {formatTime(recordingTime)}</span>
-                                    </div>
-                                )}
-                                {isTranscribing && (
-                                    <div className="bg-blue-50 text-blue-600 px-4 py-2 rounded-full border border-blue-100 shadow-sm flex items-center space-x-2">
-                                        <Loader2 className="w-3 h-3 animate-spin" />
-                                        <span className="text-xs font-bold">AI 转写中...</span>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Full Screen Toolbar */}
-                        <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 flex items-center justify-between shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-                             <div className="flex items-center space-x-3">
-                                {!isRecording ? (
-                                    <>
-                                        <button 
-                                            onClick={startRecording} 
-                                            disabled={isAnalyzing || isTranscribing || !selectedClientId} 
-                                            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-all ${isAnalyzing || isTranscribing || !selectedClientId ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'}`}
-                                        >
-                                            <Mic className="w-5 h-5" />
-                                            <span>开始录音</span>
-                                        </button>
-                                        
-                                        {latestAudio && (
-                                           <button 
-                                               onClick={() => {
-                                                   if (playingAudioId === latestAudio.id) {
-                                                       audioPlayerRef.current?.pause();
-                                                       setPlayingAudioId(null);
-                                                   } else {
-                                                       if (audioPlayerRef.current) {
-                                                           audioPlayerRef.current.src = latestAudio.url;
-                                                           audioPlayerRef.current.play();
-                                                           setPlayingAudioId(latestAudio.id);
-                                                           audioPlayerRef.current.onended = () => setPlayingAudioId(null);
-                                                       }
-                                                   }
-                                               }}
-                                               className={`flex items-center space-x-2 px-4 py-2 rounded-lg border transition-all ${playingAudioId === latestAudio.id ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}
-                                           >
-                                               {playingAudioId === latestAudio.id ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-                                               <span>{playingAudioId === latestAudio.id ? '暂停' : '播放录音'}</span>
-                                           </button>
-                                       )}
-                                    </>
-                                ) : (
-                                    <button 
-                                        onClick={() => { mediaRecorderRef.current?.stop(); setIsRecording(false); }} 
-                                        className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 shadow-md animate-pulse"
-                                    >
-                                        <Square className="w-5 h-5 fill-current" />
-                                        <span>停止录音</span>
-                                    </button>
-                                )}
-                             </div>
-
-                             <div className="flex items-center space-x-3">
-                                 <button 
-                                     onClick={() => setIsAIConfigOpen(true)}
-                                     className="flex items-center space-x-1.5 px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs font-bold text-gray-700 transition-colors border border-gray-200"
-                                     title="配置 AI 模型"
-                                 >
-                                      {activeModel === 'Gemini' ? <Sparkles className="w-4 h-4 text-blue-500" /> : <BrainCircuit className="w-4 h-4 text-purple-500" />}
-                                      <span>{activeModel === 'Gemini' ? 'Gemini' : 'DeepSeek'}</span>
-                                 </button>
-                                 <button 
-                                    onClick={handleAnalyze} 
-                                    disabled={!rawNotes || isAnalyzing || isRecording} 
-                                    className={`flex items-center space-x-2 px-5 py-2 rounded-lg font-medium text-white shadow-sm transition-all ${!rawNotes || isAnalyzing || isRecording ? 'bg-gray-300 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'}`}
-                                 >
-                                    {isAnalyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                                    <span>智能分析</span>
-                                 </button>
-                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )}
-      </>
-    );
+      );
   }
 
+  // EDIT VIEW
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-        <div className="flex items-center space-x-4 w-full md:w-auto">
-             <h2 className="text-2xl font-bold text-gray-800">拜访管理</h2>
-             <div className="flex bg-gray-200 rounded-lg p-1">
-                <button onClick={() => setView('LIST')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${view === 'LIST' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}>列表</button>
-                <button onClick={() => setView('CALENDAR')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${view === 'CALENDAR' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}>日历</button>
-            </div>
-        </div>
-        <button onClick={() => { resetForm(); setView('CREATE'); }} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium flex items-center justify-center space-x-2 shadow-md">
-          <Calendar className="w-5 h-5" /><span>记录新拜访</span>
-        </button>
-      </div>
-
-      {view === 'LIST' && (
-          <div className="space-y-4 animate-fade-in">
-            <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="md:col-span-2 relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                    <input type="text" placeholder="搜索客户..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                </div>
-                <select className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={filterOutcome} onChange={(e) => setFilterOutcome(e.target.value)}>
-                    <option value="ALL">全部结果</option><option value="Positive">积极</option><option value="Neutral">中立</option><option value="Negative">消极</option>
-                </select>
-                <button onClick={() => { setSearchTerm(''); setFilterOutcome('ALL'); setFilterStartDate(''); setFilterEndDate(''); }} className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-medium">重置</button>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <table className="w-full text-left text-sm">
-                    <thead className="bg-gray-50/50">
-                        <tr className="border-b text-gray-400 text-[11px] font-bold uppercase tracking-wider">
-                            <th className="py-3 pl-6">客户/类型</th><th className="py-3">日期</th><th className="py-3">摘要</th><th className="py-3">结果</th><th className="py-3 text-right pr-6">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                        {filteredVisits.map(visit => (
-                            <tr key={visit.id} className="hover:bg-blue-50/30 transition-colors group">
-                                <td className="py-3 pl-6">
-                                    <div className="font-semibold text-gray-900">{visit.clientName}</div>
-                                    <div className={`text-[10px] inline-flex items-center mt-1 px-1.5 py-0.5 rounded font-bold ${visit.category === 'Inbound' ? 'bg-purple-50 text-purple-600 border border-purple-100' : 'bg-blue-50 text-blue-600 border border-blue-100'}`}>
-                                        {visit.category === 'Inbound' ? <Home className="w-2.5 h-2.5 mr-1"/> : <MapPin className="w-2.5 h-2.5 mr-1"/>}
-                                        {visit.category === 'Inbound' ? '客户到访' : '外出拜访'}
-                                    </div>
-                                </td>
-                                <td className="py-3 text-gray-500 tabular-nums text-xs">{new Date(visit.date).toLocaleDateString('zh-CN')}</td>
-                                <td className="py-3 text-gray-500 max-w-md truncate">{visit.summary}</td>
-                                <td className="py-3">
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${visit.outcome === 'Positive' ? 'bg-green-50 text-green-600 border border-green-100' : visit.outcome === 'Negative' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-gray-50 text-gray-500'}`}>
-                                        {visit.outcome === 'Positive' ? '积极' : visit.outcome === 'Negative' ? '消极' : '中立'}
-                                    </span>
-                                </td>
-                                <td className="py-3 text-right pr-6"><div className="flex justify-end space-x-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => startEdit(visit)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Pencil className="w-4 h-4"/></button><button onClick={() => onDeleteVisit(visit.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4"/></button></div></td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+      <div className="h-full flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden relative">
+          <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <div className="flex items-center space-x-4">
+                  <button onClick={() => setView('LIST')} className="p-2 hover:bg-white rounded-full transition-colors text-gray-500">
+                      <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <h2 className="text-xl font-bold text-gray-900">{editingId ? '编辑拜访记录' : '新拜访记录'}</h2>
+              </div>
+              <div className="flex items-center space-x-3">
+                   {hasUnsavedChanges && <span className="text-xs text-orange-500 font-medium animate-pulse">未保存</span>}
+                   {editingId && (
+                      <button onClick={() => { if(confirm('确定删除?')) { onDeleteVisit(editingId); setView('LIST'); } }} className="text-red-600 hover:bg-red-50 p-2 rounded-lg"><Trash2 className="w-5 h-5" /></button>
+                   )}
+                   <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold shadow-sm transition-all flex items-center">
+                       <Save className="w-4 h-4 mr-2" /> 保存
+                   </button>
+              </div>
           </div>
-      )}
-    </div>
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Left Column: Details */}
+                  <div className="space-y-6">
+                      <div className="space-y-4">
+                          <label className="block text-sm font-bold text-gray-700 uppercase tracking-wide">基础信息</label>
+                          <div>
+                              <label className="text-xs font-semibold text-gray-500 mb-1 block">客户</label>
+                              <select 
+                                  className="w-full border border-gray-300 rounded-lg p-3 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                  value={selectedClientId}
+                                  onChange={e => setSelectedClientId(e.target.value)}
+                              >
+                                  <option value="">选择客户...</option>
+                                  {clients.map(c => <option key={c.id} value={c.id}>{c.name} - {c.company}</option>)}
+                              </select>
+                              {selectedClientId && clientPosition && (
+                                  <div className="mt-2 text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg inline-block border border-blue-100">
+                                      <span className="font-bold">当前职位:</span> {clientPosition}
+                                  </div>
+                              )}
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                  <label className="text-xs font-semibold text-gray-500 mb-1 block">日期</label>
+                                  <input type="date" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={date} onChange={e => setDate(e.target.value)} />
+                              </div>
+                              <div>
+                                  <label className="text-xs font-semibold text-gray-500 mb-1 block">类型</label>
+                                  <select className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={category} onChange={e => setCategory(e.target.value as VisitCategory)}>
+                                      <option value="Outbound">外出拜访</option>
+                                      <option value="Inbound">客户来访</option>
+                                  </select>
+                              </div>
+                          </div>
+
+                          <div>
+                              <label className="text-xs font-semibold text-gray-500 mb-1 block">参与人员</label>
+                              <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="如：张经理, 李工" value={participants} onChange={e => setParticipants(e.target.value)} />
+                          </div>
+                      </div>
+
+                      {/* Custom Fields */}
+                      {visitDefinitions.length > 0 && (
+                          <div className="space-y-4 pt-4 border-t border-gray-100">
+                              <label className="block text-sm font-bold text-gray-700 uppercase tracking-wide">其他信息</label>
+                              {visitDefinitions.map(def => (
+                                  <div key={def.id}>
+                                      <label className="text-xs font-semibold text-gray-500 mb-1 block">{def.label}</label>
+                                      <input 
+                                          type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
+                                          className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                          placeholder={`输入${def.label}...`}
+                                          value={customFieldsValues[def.id] || ''}
+                                          onChange={e => setCustomFieldsValues({...customFieldsValues, [def.id]: e.target.value})}
+                                      />
+                                  </div>
+                              ))}
+                          </div>
+                      )}
+
+                       <div className="pt-4 border-t border-gray-100">
+                           <label className="block text-sm font-bold text-gray-700 uppercase tracking-wide mb-3">附件</label>
+                           <div className="flex flex-wrap gap-2 mb-3">
+                               {existingAttachments.map((att, idx) => (
+                                   <div key={att.id} className="relative group bg-gray-50 border border-gray-200 rounded-lg p-2 pr-8 flex items-center">
+                                       {att.type === 'image' ? <ImageIcon className="w-4 h-4 mr-2 text-blue-500" /> : <FileText className="w-4 h-4 mr-2 text-gray-500" />}
+                                       <span className="text-xs truncate max-w-[100px]">{att.name}</span>
+                                       <button onClick={() => setExistingAttachments(prev => prev.filter(a => a.id !== att.id))} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-1"><X className="w-3 h-3" /></button>
+                                   </div>
+                               ))}
+                           </div>
+                           <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                           <button onClick={() => fileInputRef.current?.click()} className="w-full border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-500 hover:text-blue-600 rounded-lg p-3 text-sm font-medium transition-all flex items-center justify-center">
+                               <Paperclip className="w-4 h-4 mr-2" /> 上传图片/文档
+                           </button>
+                       </div>
+                  </div>
+
+                  {/* Middle & Right: Notes & AI */}
+                  <div className="lg:col-span-2 flex flex-col h-[800px]">
+                      {/* Toolbar */}
+                      <div className="flex items-center justify-between mb-4 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                           <div className="flex items-center space-x-2">
+                               <button 
+                                  onClick={isRecording ? stopRecording : startRecording}
+                                  className={`flex items-center px-4 py-2 rounded-lg font-bold transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
+                               >
+                                   {isRecording ? <Square className="w-4 h-4 mr-2 fill-current" /> : <Mic className="w-4 h-4 mr-2" />}
+                                   {isRecording ? '停止录音' : '语音录入'}
+                               </button>
+                               <span className="text-xs text-gray-400 hidden sm:inline-block">支持实时转写</span>
+                           </div>
+                           <div className="flex items-center space-x-2">
+                               <button 
+                                   onClick={() => setShowAIConfig(true)}
+                                   className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg transition-colors"
+                                   title="AI 模型设置"
+                               >
+                                   <Settings className="w-5 h-5" />
+                               </button>
+                               <button 
+                                  onClick={handleAIAnalysis}
+                                  disabled={isAnalyzing || !rawNotes}
+                                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-bold shadow-md shadow-indigo-100 flex items-center transition-all"
+                               >
+                                   {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                                   {isAnalyzing ? '分析中...' : 'AI 智能分析'}
+                               </button>
+                           </div>
+                      </div>
+
+                      {transcriptionError && (
+                          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center">
+                              <AlertCircle className="w-4 h-4 mr-2" />
+                              {transcriptionError}
+                          </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1 min-h-0">
+                          {/* Raw Notes Area */}
+                          <div className="flex flex-col h-full">
+                              <label className="block text-sm font-bold text-gray-700 mb-2 flex justify-between">
+                                  <span>原始笔记 / 语音转写</span>
+                                  <span className="text-xs font-normal text-gray-400">{rawNotes.length} 字</span>
+                              </label>
+                              <textarea 
+                                  className="flex-1 w-full border border-gray-300 rounded-xl p-4 text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none resize-none leading-relaxed text-sm bg-white"
+                                  placeholder="在此输入会议纪要，或使用语音录入..."
+                                  value={rawNotes}
+                                  onChange={e => { setRawNotes(e.target.value); setHasUnsavedChanges(true); }}
+                              />
+                          </div>
+
+                          {/* Analysis Result Area */}
+                          <div className="flex flex-col h-full bg-indigo-50/50 rounded-xl border border-indigo-100 p-4 overflow-y-auto custom-scrollbar">
+                               <div className="space-y-6">
+                                   {/* Summary */}
+                                   <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-50">
+                                       <h4 className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-2 flex items-center"><FileText className="w-3 h-3 mr-1" /> 智能摘要</h4>
+                                       {summary ? (
+                                           <p className="text-sm text-gray-800 leading-relaxed">{summary}</p>
+                                       ) : (
+                                           <p className="text-sm text-gray-400 italic">点击 AI 分析生成摘要...</p>
+                                       )}
+                                   </div>
+
+                                   {/* Sentiment & Action Items */}
+                                   <div className="grid grid-cols-2 gap-4">
+                                       <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-50">
+                                           <h4 className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-2">客户情绪</h4>
+                                           <div className="flex items-center space-x-2">
+                                               <div className={`w-3 h-3 rounded-full ${outcome === 'Positive' ? 'bg-green-500' : outcome === 'Negative' ? 'bg-red-500' : 'bg-gray-400'}`}></div>
+                                               <span className="font-bold text-gray-900">{outcome}</span>
+                                           </div>
+                                       </div>
+                                       <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-50">
+                                            <h4 className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-2">置信度</h4>
+                                            <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                                                <div className="bg-indigo-500 h-2 rounded-full" style={{ width: `${sentimentScore}%` }}></div>
+                                            </div>
+                                            <div className="text-right text-xs text-gray-500 mt-1">{sentimentScore}%</div>
+                                       </div>
+                                   </div>
+
+                                   {/* Action Items List */}
+                                   <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-50">
+                                       <h4 className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-3">待办事项</h4>
+                                       {actionItems.length > 0 ? (
+                                           <ul className="space-y-2">
+                                               {actionItems.map((item, i) => (
+                                                   <li key={i} className="flex items-start text-sm text-gray-700">
+                                                       <input type="checkbox" className="mt-1 mr-2 rounded text-indigo-600 focus:ring-indigo-500" />
+                                                       <span className="flex-1">{item}</span>
+                                                   </li>
+                                               ))}
+                                           </ul>
+                                       ) : (
+                                           <p className="text-sm text-gray-400 italic">暂无待办项</p>
+                                       )}
+                                   </div>
+
+                                   {/* Email Draft */}
+                                   <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-50">
+                                       <div className="flex justify-between items-center mb-3">
+                                            <h4 className="text-xs font-bold text-indigo-500 uppercase tracking-wider">跟进邮件草稿</h4>
+                                            <button 
+                                                onClick={() => { navigator.clipboard.writeText(followUpEmailDraft); alert('已复制邮件内容'); }}
+                                                className="text-xs text-blue-600 hover:text-blue-800 font-bold"
+                                            >
+                                                复制内容
+                                            </button>
+                                       </div>
+                                       <textarea 
+                                           className="w-full h-32 text-sm text-gray-600 bg-gray-50 rounded-lg p-3 border-0 focus:ring-0 resize-none"
+                                           value={followUpEmailDraft}
+                                           onChange={e => setFollowUpEmailDraft(e.target.value)}
+                                           placeholder="AI 将在此生成邮件草稿..."
+                                       />
+                                   </div>
+                               </div>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+
+          {/* AI Settings Modal */}
+          {showAIConfig && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
+                <div className="bg-gray-900 px-6 py-4 flex justify-between items-center border-b border-gray-800">
+                    <h3 className="text-lg font-bold text-white flex items-center">
+                        <Settings className="w-5 h-5 mr-2 text-blue-400" />
+                        AI 模型配置
+                    </h3>
+                    <button onClick={() => setShowAIConfig(false)} className="text-gray-400 hover:text-white transition-colors hover:bg-gray-800 p-1 rounded-lg">
+                        <X className="w-6 h-6" />
+                    </button>
+                </div>
+                <div className="p-6 space-y-6">
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-3">选择分析模型</label>
+                        <div className="grid grid-cols-2 gap-4">
+                            <button 
+                                onClick={() => handleUpdateModel('Gemini')}
+                                className={`relative p-4 rounded-xl border-2 transition-all text-left ${storageSettings.aiConfig.activeModel === 'Gemini' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+                            >
+                                <div className="font-bold text-gray-900 mb-1">Gemini</div>
+                                <div className="text-xs text-gray-500">Google GenAI (推荐)</div>
+                                {storageSettings.aiConfig.activeModel === 'Gemini' && <div className="absolute top-3 right-3 text-blue-600"><Check className="w-4 h-4" /></div>}
+                            </button>
+                            <button 
+                                onClick={() => handleUpdateModel('DeepSeek')}
+                                className={`relative p-4 rounded-xl border-2 transition-all text-left ${storageSettings.aiConfig.activeModel === 'DeepSeek' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+                            >
+                                <div className="font-bold text-gray-900 mb-1">DeepSeek</div>
+                                <div className="text-xs text-gray-500">DeepSeek V3/R1</div>
+                                {storageSettings.aiConfig.activeModel === 'DeepSeek' && <div className="absolute top-3 right-3 text-blue-600"><Check className="w-4 h-4" /></div>}
+                            </button>
+                        </div>
+                    </div>
+
+                    {storageSettings.aiConfig.activeModel === 'DeepSeek' && (
+                        <div className="animate-fade-in">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">DeepSeek API Key</label>
+                            <div className="relative">
+                                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <input 
+                                    type="password"
+                                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="sk-..."
+                                    value={storageSettings.aiConfig.deepSeekApiKey || ''}
+                                    onChange={(e) => handleUpdateDeepSeekKey(e.target.value)}
+                                />
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">API Key 仅保存在您的本地浏览器中，不会上传至任何第三方服务器。</p>
+                        </div>
+                    )}
+                </div>
+                <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+                    <button onClick={() => setShowAIConfig(false)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg transition-colors">
+                        完成配置
+                    </button>
+                </div>
+              </div>
+            </div>
+          )}
+      </div>
   );
 };
 

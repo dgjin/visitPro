@@ -1,4 +1,3 @@
-
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { StorageSettings, Client, Visit, User, CustomFieldDefinition, SupabaseConfig } from '../types';
 
@@ -14,8 +13,12 @@ const memoryStorage = {
 };
 
 export const initSupabase = (config: StorageSettings['supabaseConfig']) => {
-  if (config.url && config.anonKey) {
-    const newSignature = `${config.url}|${config.anonKey}`;
+  // Try to use process.env if available, otherwise fall back to config object
+  const url = process.env.SUPABASE_URL || config.url;
+  const key = process.env.SUPABASE_ANON_KEY || config.anonKey;
+
+  if (url && key) {
+    const newSignature = `${url}|${key}`;
     
     // Return existing instance if config hasn't changed to prevent duplicate clients
     if (supabase && currentConfigSignature === newSignature) {
@@ -24,7 +27,7 @@ export const initSupabase = (config: StorageSettings['supabaseConfig']) => {
 
     try {
       console.log("[Supabase] Initializing main client...");
-      supabase = createClient(config.url, config.anonKey, {
+      supabase = createClient(url, key, {
         auth: { 
           persistSession: false,
           autoRefreshToken: false,
@@ -54,10 +57,13 @@ export const getSupabaseClient = () => supabase;
 
 // Test connection and check if tables exist
 export const testConnection = async (config: SupabaseConfig): Promise<{ success: boolean; message: string; missingTables?: boolean; details?: string }> => {
-  if (!config.url || !config.anonKey) {
-    return { success: false, message: "URL 或 API Key 为空" };
+  const url = process.env.SUPABASE_URL || config.url;
+  const key = process.env.SUPABASE_ANON_KEY || config.anonKey;
+
+  if (!url || !key) {
+    return { success: false, message: "URL 或 API Key 为空 (请检查环境变量 SUPABASE_URL/SUPABASE_ANON_KEY 或手动配置)" };
   }
-  if (!config.url.startsWith('http')) {
+  if (!url.startsWith('http')) {
     return { success: false, message: "Project URL 必须以 https:// 开头" };
   }
 
@@ -73,7 +79,7 @@ export const testConnection = async (config: SupabaseConfig): Promise<{ success:
         // CRITICAL: Use a highly unique storageKey to avoid collision with main client
         const uniqueKey = `visitpro-test-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
         
-        const tempClient = createClient(config.url, config.anonKey, {
+        const tempClient = createClient(url, key, {
             auth: { 
               persistSession: false,
               storage: memoryStorage,
@@ -323,7 +329,8 @@ export const addClient = async (client: Client) => {
 
 export const updateClient = async (client: Client) => {
   if (!supabase) throw new Error("数据库连接未初始化。请检查 Supabase 配置。");
-  const { error } = await supabase.from('clients').update(mapClientToDb(client)).eq('id', client.id);
+  // Use UPSERT to ensure data is saved even if it exists locally but not on backend yet
+  const { error } = await supabase.from('clients').upsert(mapClientToDb(client));
   if (error) throw new Error(`更新客户失败: ${error.message}`);
 };
 
@@ -341,7 +348,8 @@ export const addVisit = async (visit: Visit) => {
 
 export const updateVisit = async (visit: Visit) => {
   if (!supabase) throw new Error("数据库连接未初始化。请检查 Supabase 配置。");
-  const { error } = await supabase.from('visits').update(mapVisitToDb(visit)).eq('id', visit.id);
+  // Use UPSERT for robustness
+  const { error } = await supabase.from('visits').upsert(mapVisitToDb(visit));
   if (error) throw new Error(`更新拜访记录失败: ${error.message}`);
 };
 
@@ -359,7 +367,8 @@ export const addUser = async (user: User) => {
 
 export const updateUser = async (user: User) => {
   if (!supabase) throw new Error("数据库连接未初始化。请检查 Supabase 配置。");
-  const { error } = await supabase.from('users').update(mapUserToDb(user)).eq('id', user.id);
+  // Use UPSERT for robustness
+  const { error } = await supabase.from('users').upsert(mapUserToDb(user));
   if (error) throw new Error(`更新用户失败: ${error.message}`);
 };
 

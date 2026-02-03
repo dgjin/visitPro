@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Menu, X, Sparkles, Shield, User as UserIcon } from 'lucide-react';
 import Dashboard from './components/Dashboard';
@@ -33,7 +32,7 @@ const MOCK_VISITS: Visit[] = [
 ];
 
 const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
-  mode: 'SUPABASE',
+  mode: 'LOCAL_FILE', // Changed default from SUPABASE to LOCAL_FILE to prevent init errors
   mysqlConfig: { host: '', port: '3306', username: '', password: '', database: '' },
   supabaseConfig: { url: '', anonKey: '' },
   emailConfig: { smtpHost: 'smtp.example.com', smtpPort: '587', senderName: 'VisitPro Agent', senderEmail: 'sales@visitpro.com', authEnabled: false, authUsername: '', authPassword: '' },
@@ -81,9 +80,15 @@ const App: React.FC = () => {
 
   // Initialize Supabase on load or setting change
   useEffect(() => {
-    // Always initialize/update the client when settings change, even if not in SUPABASE mode initially,
-    // so that the client is ready when switching modes.
-    if (storageSettings.supabaseConfig?.url) {
+    // If mode is SUPABASE but config is missing, revert to LOCAL_FILE to prevent errors
+    if (storageSettings.mode === 'SUPABASE' && !storageSettings.supabaseConfig?.url && !process.env.SUPABASE_URL) {
+        console.warn("Supabase mode enabled but no configuration found. Reverting to Local File mode.");
+        setStorageSettings(prev => ({ ...prev, mode: 'LOCAL_FILE' }));
+        return;
+    }
+
+    // Always initialize/update the client when settings change
+    if (storageSettings.supabaseConfig?.url || process.env.SUPABASE_URL) {
       const client = initSupabase(storageSettings.supabaseConfig);
       
       // Only auto-fetch if explicitly in SUPABASE mode
@@ -97,6 +102,7 @@ const App: React.FC = () => {
               }
           }).catch(err => {
               console.error("Auto fetch failed:", err);
+              // Don't alert here to avoid spamming the user on load, just log it.
           });
       }
     }

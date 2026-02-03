@@ -61,16 +61,18 @@ const cleanJsonString = (text: string) => {
 
 // DeepSeek specific implementation
 const analyzeWithDeepSeek = async (
-  prompt: string
+  prompt: string,
+  apiKey?: string
 ): Promise<AIAnalysisResult> => {
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) throw new Error("DeepSeek API Key 未配置 (请检查环境变量 DEEPSEEK_API_KEY)");
+    // Prioritize passed key, fallback to env
+    const key = apiKey || process.env.DEEPSEEK_API_KEY;
+    if (!key) throw new Error("DeepSeek API Key 未配置 (请在设置中输入 Key 或检查环境变量)");
 
     const response = await fetch("https://api.deepseek.com/chat/completions", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`
+            "Authorization": `Bearer ${key}`
         },
         body: JSON.stringify({
             model: "deepseek-chat",
@@ -145,13 +147,14 @@ export const analyzeVisitNotes = async (
   clientIndustry: string,
   rawNotes: string,
   modelProvider: AIModelProvider = 'Gemini',
-  emailTone: EmailTone = 'Formal'
+  emailTone: EmailTone = 'Formal',
+  deepSeekApiKey?: string
 ): Promise<AIAnalysisResult> => {
   
   const prompt = buildPrompt(clientName, clientIndustry, rawNotes, emailTone);
 
   if (modelProvider === 'DeepSeek') {
-      return analyzeWithDeepSeek(prompt);
+      return analyzeWithDeepSeek(prompt, deepSeekApiKey);
   }
 
   // Default to Gemini
@@ -199,6 +202,7 @@ export const analyzeVisitAudio = async (
   audioBase64: string,
   mimeType: string
 ): Promise<AIAnalysisResult> => {
+  // Audio analysis currently defaults to Gemini as DeepSeek is text-focused in this implementation
   if (!process.env.API_KEY) {
      console.warn("API Key is missing. Returning mock data.");
     return {
