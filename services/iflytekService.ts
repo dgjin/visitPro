@@ -1,3 +1,4 @@
+
 // 声明全局 CryptoJS，因为它是在 index.html 中通过 CDN 引入的
 declare var CryptoJS: any;
 
@@ -19,8 +20,14 @@ const convertTo16kPCM = async (audioBlob: Blob): Promise<ArrayBuffer> => {
   return new Promise((resolve, reject) => {
     fileReader.onload = async (e) => {
         try {
-            const arrayBuffer = e.target?.result as ArrayBuffer;
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            const arrayBuffer = e.target?.result;
+            if (!arrayBuffer || typeof arrayBuffer === 'string') {
+                reject(new Error("Failed to read audio file"));
+                return;
+            }
+            // Use 'as any' to avoid TS type mismatch between ArrayBufferLike and ArrayBuffer
+            // caused by SharedArrayBuffer compatibility checks in some environments
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer as any);
             
             // 使用 OfflineAudioContext 进行重采样 (44.1/48kHz -> 16kHz)
             const offlineContext = new OfflineAudioContext(1, audioBuffer.duration * 16000, 16000);
@@ -39,7 +46,7 @@ const convertTo16kPCM = async (audioBlob: Blob): Promise<ArrayBuffer> => {
                 int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
             
-            resolve(int16Data.buffer);
+            resolve(int16Data.buffer as ArrayBuffer);
         } catch (err) {
             reject(err);
         }

@@ -1,8 +1,12 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
     <title>VisitPro - 客户拜访管理</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
@@ -21,18 +25,37 @@
       };
     </script>
     <script type="importmap">
-    {
-      "imports": {
-        "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
-        "react/": "https://esm.sh/react@^19.2.4/",
-        "react": "https://esm.sh/react@^19.2.4",
-        "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-        "recharts": "https://esm.sh/recharts@^3.7.0",
-        "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
-        "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
+{
+  "imports": {
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "recharts": "https://esm.sh/recharts@^3.7.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "@tarojs/components": "https://esm.sh/@tarojs/components@^4.1.11",
+    "@tarojs/taro": "https://esm.sh/@tarojs/taro@^4.1.11",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.93.3"
+  }
+}
+</script>
+    <style>
+      /* 简单的加载动画，在 React 挂载前显示 */
+      #root:empty {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background: #f9fafb;
       }
-    }
-    </script>
+      #root:empty::after {
+        content: "VisitPro 正在加载...";
+        color: #6b7280;
+        font-family: sans-serif;
+        font-size: 14px;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

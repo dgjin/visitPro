@@ -40,7 +40,7 @@ export interface Attachment {
   id: string;
   name: string;
   type: 'image' | 'document' | 'other';
-  url: string;
+  url: string; // Base64 or local temp path
 }
 
 export type VisitCategory = 'Outbound' | 'Inbound';
@@ -63,13 +63,6 @@ export interface Visit {
   attachments?: Attachment[];
 }
 
-export enum ViewState {
-  DASHBOARD = 'DASHBOARD',
-  CLIENTS = 'CLIENTS',
-  VISITS = 'VISITS',
-  ADMIN = 'ADMIN',
-}
-
 export interface AIAnalysisResult {
   summary: string;
   sentiment: 'Positive' | 'Neutral' | 'Negative';
@@ -79,9 +72,13 @@ export interface AIAnalysisResult {
   transcription?: string;
 }
 
-export type StorageMode = 'LOCAL_FILE' | 'MYSQL' | 'SUPABASE';
 export type AIModelProvider = 'Gemini' | 'DeepSeek';
-export type EmailTone = 'Formal' | 'Friendly' | 'Concise';
+export type StorageMode = 'LOCAL_FILE' | 'MYSQL' | 'SUPABASE';
+
+export interface AIConfig {
+  activeModel: AIModelProvider;
+  deepSeekApiKey: string;
+}
 
 export interface MySQLConfig {
   host: string;
@@ -106,24 +103,23 @@ export interface EmailConfig {
   authPassword?: string;
 }
 
-export interface AIConfig {
-  activeModel: AIModelProvider;
-  deepSeekApiKey: string;
-}
-
-export interface IFlyTekConfig {
-  appId: string;
-  apiSecret: string;
-  apiKey: string;
-}
-
-export interface StorageSettings {
-  mode: StorageMode;
+export interface AppSettings {
+  geminiApiKey: string;
+  userName: string;
+  userRole: 'Admin' | 'User';
+  storageMode: StorageMode;
   mysqlConfig: MySQLConfig;
   supabaseConfig: SupabaseConfig;
   emailConfig: EmailConfig;
   aiConfig: AIConfig;
-  iflytekConfig: IFlyTekConfig;
   lastBackupDate?: string;
-  lastSyncDate?: string;
+  lastSyncDate?: string; // New: track sync time
+}
+
+export interface AppData {
+  clients: Client[];
+  visits: Visit[];
+  users: User[];
+  fieldDefinitions: CustomFieldDefinition[];
+  settings: AppSettings;
 }

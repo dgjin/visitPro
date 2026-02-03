@@ -6,6 +6,7 @@ import ClientManager from './components/ClientManager';
 import VisitManager from './components/VisitManager';
 import AdminPanel from './components/AdminPanel';
 import { Client, Visit, ViewState, User, CustomFieldDefinition, StorageSettings } from './types';
+import { initSupabase, fetchAllData, addClient, updateClient, deleteClient, addVisit, updateVisit, deleteVisit, addUser, updateUser, deleteUser, addField, deleteField } from './services/supabaseService';
 
 const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
   { id: 'f1', target: 'Client', label: '职位', type: 'text' },
@@ -32,8 +33,9 @@ const MOCK_VISITS: Visit[] = [
 ];
 
 const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
-  mode: 'LOCAL_FILE',
+  mode: 'SUPABASE',
   mysqlConfig: { host: '', port: '3306', username: '', password: '', database: '' },
+  supabaseConfig: { url: '', anonKey: '' },
   emailConfig: { smtpHost: 'smtp.example.com', smtpPort: '587', senderName: 'VisitPro Agent', senderEmail: 'sales@visitpro.com', authEnabled: false, authUsername: '', authPassword: '' },
   aiConfig: { activeModel: 'Gemini', deepSeekApiKey: '' },
   iflytekConfig: { appId: '', apiSecret: '', apiKey: '' }
@@ -47,15 +49,13 @@ const App: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // 迁移旧数据
+        // Migration logic
+        if (!parsed.storageSettings.supabaseConfig) {
+            parsed.storageSettings.supabaseConfig = DEFAULT_STORAGE_SETTINGS.supabaseConfig;
+        }
         if (!parsed.storageSettings.emailConfig) {
             parsed.storageSettings.emailConfig = DEFAULT_STORAGE_SETTINGS.emailConfig;
-        } else if (parsed.storageSettings.emailConfig.authEnabled === undefined) {
-            parsed.storageSettings.emailConfig.authEnabled = false;
-            parsed.storageSettings.emailConfig.authUsername = '';
-            parsed.storageSettings.emailConfig.authPassword = '';
         }
-        // 迁移 iFlytek 配置
         if (!parsed.storageSettings.iflytekConfig) {
             parsed.storageSettings.iflytekConfig = DEFAULT_STORAGE_SETTINGS.iflytekConfig;
         }
@@ -79,15 +79,37 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User>(users[0]);
   const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
 
+  // Initialize Supabase on load or setting change
   useEffect(() => {
-    if (storageSettings.mode === 'LOCAL_FILE') {
-        const dataToSave = { users, clients, visits, fieldDefinitions, storageSettings };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+    // Always initialize/update the client when settings change, even if not in SUPABASE mode initially,
+    // so that the client is ready when switching modes.
+    if (storageSettings.supabaseConfig?.url) {
+      const client = initSupabase(storageSettings.supabaseConfig);
+      
+      // Only auto-fetch if explicitly in SUPABASE mode
+      if (storageSettings.mode === 'SUPABASE' && client) {
+          fetchAllData().then(data => {
+              if (data.users.length > 0 || data.clients.length > 0) {
+                  setUsers(data.users);
+                  setClients(data.clients);
+                  setVisits(data.visits);
+                  setFieldDefinitions(data.fieldDefinitions);
+              }
+          }).catch(err => {
+              console.error("Auto fetch failed:", err);
+          });
+      }
     }
+  }, [storageSettings.mode, storageSettings.supabaseConfig]);
+
+  // Persist to local storage (acts as cache or offline store)
+  useEffect(() => {
+    const dataToSave = { users, clients, visits, fieldDefinitions, storageSettings };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
   }, [users, clients, visits, fieldDefinitions, storageSettings]);
 
   const handleBackupData = () => {
-      const data = { metadata: { version: '1.1', exportDate: new Date().toISOString() }, users, clients, visits, fieldDefinitions, storageSettings: { ...storageSettings, lastBackupDate: new Date().toISOString() } };
+      const data = { metadata: { version: '1.2', exportDate: new Date().toISOString() }, users, clients, visits, fieldDefinitions, storageSettings: { ...storageSettings, lastBackupDate: new Date().toISOString() } };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -122,19 +144,152 @@ const App: React.FC = () => {
       reader.readAsText(file);
   };
 
-  const handleAddClient = (newClient: Client) => setClients(prev => [...prev, newClient]);
-  const handleUpdateClient = (updatedClient: Client) => setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-  const handleDeleteClient = (clientId: string) => { if (confirm('确定要删除此客户吗？')) setClients(prev => prev.filter(c => c.id !== clientId)); };
-  const handleAddVisit = (newVisit: Visit) => setVisits(prev => [newVisit, ...prev]);
-  const handleUpdateVisit = (updatedVisit: Visit) => setVisits(prev => prev.map(v => v.id === updatedVisit.id ? updatedVisit : v));
-  const handleDeleteVisit = (visitId: string) => { if (confirm('确定要删除这条拜访记录吗？')) setVisits(prev => prev.filter(v => v.id !== visitId)); };
+  const handleSyncSupabase = async () => {
+      if (storageSettings.mode !== 'SUPABASE') {
+          alert('请先在设置中启用 Supabase 模式');
+          return;
+      }
+      try {
+          const data = await fetchAllData();
+          setUsers(data.users);
+          setClients(data.clients);
+          setVisits(data.visits);
+          setFieldDefinitions(data.fieldDefinitions);
+          setStorageSettings(prev => ({ ...prev, lastSyncDate: new Date().toISOString() }));
+          alert('云端数据同步完成！');
+      } catch (e: any) {
+          console.error("Sync failed", e);
+          alert(`同步失败: ${e.message}`);
+      }
+  };
+
+  const safeExecute = async (operation: Promise<void>, fallback?: () => void) => {
+      try {
+          await operation;
+      } catch (e: any) {
+          console.error("Operation failed:", e);
+          alert(`操作失败: ${e.message}`);
+          if (fallback) fallback();
+      }
+  };
+
+  const handleAddClient = async (newClient: Client) => {
+      setClients(prev => [...prev, newClient]);
+      if (storageSettings.mode === 'SUPABASE') {
+          await safeExecute(addClient(newClient), () => {
+              setClients(prev => prev.filter(c => c.id !== newClient.id));
+          });
+      }
+  };
+  const handleUpdateClient = async (updatedClient: Client) => {
+      const original = clients.find(c => c.id === updatedClient.id);
+      setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+      if (storageSettings.mode === 'SUPABASE') {
+          await safeExecute(updateClient(updatedClient), () => {
+              if (original) setClients(prev => prev.map(c => c.id === updatedClient.id ? original : c));
+          });
+      }
+  };
+  const handleDeleteClient = async (clientId: string) => { 
+      const original = clients.find(c => c.id === clientId);
+      if (confirm('确定要删除此客户吗？')) {
+          setClients(prev => prev.filter(c => c.id !== clientId));
+          if (storageSettings.mode === 'SUPABASE') {
+              await safeExecute(deleteClient(clientId), () => {
+                  if (original) setClients(prev => [...prev, original]);
+              });
+          }
+      }
+  };
+
+  const handleAddVisit = async (newVisit: Visit) => {
+      setVisits(prev => [newVisit, ...prev]);
+      if (storageSettings.mode === 'SUPABASE') {
+          await safeExecute(addVisit(newVisit), () => {
+              setVisits(prev => prev.filter(v => v.id !== newVisit.id));
+          });
+      }
+  };
+  const handleUpdateVisit = async (updatedVisit: Visit) => {
+      const original = visits.find(v => v.id === updatedVisit.id);
+      setVisits(prev => prev.map(v => v.id === updatedVisit.id ? updatedVisit : v));
+      if (storageSettings.mode === 'SUPABASE') {
+          await safeExecute(updateVisit(updatedVisit), () => {
+              if (original) setVisits(prev => prev.map(v => v.id === updatedVisit.id ? original : v));
+          });
+      }
+  };
+  const handleDeleteVisit = async (visitId: string) => { 
+      const original = visits.find(v => v.id === visitId);
+      if (confirm('确定要删除这条拜访记录吗？')) {
+          setVisits(prev => prev.filter(v => v.id !== visitId));
+          if (storageSettings.mode === 'SUPABASE') {
+              await safeExecute(deleteVisit(visitId), () => {
+                  if (original) setVisits(prev => [...prev, original]);
+              });
+          }
+      }
+  };
   const handleVisitClick = (visitId: string) => { setSelectedVisitId(visitId); setView(ViewState.VISITS); };
-  const handleAddUser = (user: User) => setUsers(prev => [...prev, user]);
-  const handleUpdateUser = (updatedUser: User) => { setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u)); if (currentUser.id === updatedUser.id) setCurrentUser(updatedUser); };
-  const handleDeleteUser = (id: string) => { if (confirm('确定要删除此用户吗？')) setUsers(prev => prev.filter(u => u.id !== id)); };
-  const handleUpdateUserRole = (id: string, role: 'Admin' | 'User') => { setUsers(prev => prev.map(u => u.id === id ? { ...u, role } : u)); if (currentUser.id === id) setCurrentUser(prev => ({ ...prev, role })); };
-  const handleAddField = (field: CustomFieldDefinition) => setFieldDefinitions(prev => [...prev, field]);
-  const handleDeleteField = (id: string) => setFieldDefinitions(prev => prev.filter(f => f.id !== id));
+
+  const handleAddUser = async (user: User) => {
+      setUsers(prev => [...prev, user]);
+      if (storageSettings.mode === 'SUPABASE') {
+          await safeExecute(addUser(user), () => {
+              setUsers(prev => prev.filter(u => u.id !== user.id));
+          });
+      }
+  };
+  const handleUpdateUser = async (updatedUser: User) => { 
+      const original = users.find(u => u.id === updatedUser.id);
+      setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u)); 
+      if (currentUser.id === updatedUser.id) setCurrentUser(updatedUser); 
+      if (storageSettings.mode === 'SUPABASE') {
+          await safeExecute(updateUser(updatedUser), () => {
+              if (original) setUsers(prev => prev.map(u => u.id === updatedUser.id ? original : u));
+          });
+      }
+  };
+  const handleDeleteUser = async (id: string) => { 
+      const original = users.find(u => u.id === id);
+      if (confirm('确定要删除此用户吗？')) {
+          setUsers(prev => prev.filter(u => u.id !== id));
+          if (storageSettings.mode === 'SUPABASE') {
+              await safeExecute(deleteUser(id), () => {
+                  if (original) setUsers(prev => [...prev, original]);
+              });
+          }
+      }
+  };
+  const handleUpdateUserRole = async (id: string, role: 'Admin' | 'User') => { 
+      const updated = users.find(u => u.id === id);
+      if (updated) {
+          const newUser = { ...updated, role };
+          setUsers(prev => prev.map(u => u.id === id ? newUser : u));
+          if (currentUser.id === id) setCurrentUser(newUser);
+          if (storageSettings.mode === 'SUPABASE') {
+              await safeExecute(updateUser(newUser)); // No rollback needed strictly for role change unless critical
+          }
+      }
+  };
+
+  const handleAddField = async (field: CustomFieldDefinition) => {
+      setFieldDefinitions(prev => [...prev, field]);
+      if (storageSettings.mode === 'SUPABASE') {
+          await safeExecute(addField(field), () => {
+              setFieldDefinitions(prev => prev.filter(f => f.id !== field.id));
+          });
+      }
+  };
+  const handleDeleteField = async (id: string) => {
+      const original = fieldDefinitions.find(f => f.id === id);
+      setFieldDefinitions(prev => prev.filter(f => f.id !== id));
+      if (storageSettings.mode === 'SUPABASE') {
+          await safeExecute(deleteField(id), () => {
+              if (original) setFieldDefinitions(prev => [...prev, original]);
+          });
+      }
+  };
 
   const NavItem = ({ viewTarget, label, icon: Icon }: { viewTarget: ViewState, label: string, icon: any }) => (
     <button onClick={() => { setView(viewTarget); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 ${view === viewTarget ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
@@ -189,7 +344,7 @@ const App: React.FC = () => {
               {view === ViewState.DASHBOARD && <Dashboard visits={visits} users={users} totalClients={clients.length} onVisitClick={handleVisitClick} />}
               {view === ViewState.CLIENTS && <ClientManager clients={clients} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} fieldDefinitions={fieldDefinitions} />}
               {view === ViewState.VISITS && <VisitManager clients={clients} visits={visits} onAddVisit={handleAddVisit} onUpdateVisit={handleUpdateVisit} onDeleteVisit={handleDeleteVisit} onUpdateClient={handleUpdateClient} fieldDefinitions={fieldDefinitions} initialEditingVisitId={selectedVisitId} onClearInitialEditingVisitId={() => setSelectedVisitId(null)} currentUserId={currentUser.id} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} />}
-              {view === ViewState.ADMIN && currentUser.role === 'Admin' && <AdminPanel users={users} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateUserRole={handleUpdateUserRole} fieldDefinitions={fieldDefinitions} onAddField={handleAddField} onDeleteField={handleDeleteField} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} onBackupData={handleBackupData} onRestoreData={handleRestoreData} />}
+              {view === ViewState.ADMIN && currentUser.role === 'Admin' && <AdminPanel users={users} clients={clients} visits={visits} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateUserRole={handleUpdateUserRole} fieldDefinitions={fieldDefinitions} onAddField={handleAddField} onDeleteField={handleDeleteField} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} onBackupData={handleBackupData} onRestoreData={handleRestoreData} onSyncSupabase={handleSyncSupabase} />}
             </div>
           </main>
         </div>

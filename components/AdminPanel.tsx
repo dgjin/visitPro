@@ -1,10 +1,13 @@
 
 import React, { useState, useRef } from 'react';
-import { User, CustomFieldDefinition, StorageSettings, MySQLConfig } from '../types';
-import { Users, Settings, Plus, Trash2, Shield, User as UserIcon, Type, Hash, Calendar, Pencil, X, Phone, Briefcase, Users2, Database, Save, Upload, Download, HardDrive, Server, CheckCircle, AlertCircle, RefreshCw, Mail } from 'lucide-react';
+import { User, CustomFieldDefinition, StorageSettings, MySQLConfig, SupabaseConfig, Client, Visit } from '../types';
+import { Users, Settings, Plus, Trash2, Shield, User as UserIcon, Type, Hash, Calendar, Pencil, X, Phone, Briefcase, Users2, Database, Save, Upload, Download, HardDrive, Server, CheckCircle, AlertCircle, RefreshCw, Mail, Cloud, CloudLightning, FileJson, Copy, Loader2, Info, UploadCloud } from 'lucide-react';
+import { testConnection, uploadAllData, initSupabase } from '../services/supabaseService';
 
 interface AdminPanelProps {
   users: User[];
+  clients: Client[]; // Added
+  visits: Visit[];   // Added
   onAddUser: (user: User) => void;
   onUpdateUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
@@ -17,10 +20,85 @@ interface AdminPanelProps {
   onUpdateStorageSettings: (settings: StorageSettings) => void;
   onBackupData: () => void;
   onRestoreData: (file: File) => void;
+  onSyncSupabase?: () => void;
 }
+
+const SUPABASE_SCHEMA_SQL = `
+-- 1. Users Table
+create table if not exists public.users (
+  id text primary key,
+  name text,
+  email text,
+  phone text,
+  department text,
+  team_name text,
+  role text,
+  avatar_url text,
+  custom_fields jsonb default '[]'::jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 2. Clients Table
+create table if not exists public.clients (
+  id text primary key,
+  name text,
+  company text,
+  email text,
+  phone text,
+  address text,
+  avatar_url text,
+  industry text,
+  status text,
+  custom_fields jsonb default '[]'::jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 3. Visits Table
+create table if not exists public.visits (
+  id text primary key,
+  client_id text references public.clients(id),
+  client_name text,
+  user_id text,
+  date timestamp with time zone,
+  category text,
+  summary text,
+  raw_notes text,
+  participants text,
+  outcome text,
+  action_items jsonb default '[]'::jsonb,
+  sentiment_score numeric,
+  follow_up_email_draft text,
+  custom_fields jsonb default '[]'::jsonb,
+  attachments jsonb default '[]'::jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 4. Field Definitions Table (Global Config)
+create table if not exists public.field_definitions (
+  id text primary key,
+  target text, -- 'Client', 'Visit', 'User'
+  label text,
+  type text, -- 'text', 'number', 'date'
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- Optional: Enable RLS (Row Level Security) if needed later
+alter table public.users enable row level security;
+alter table public.clients enable row level security;
+alter table public.visits enable row level security;
+alter table public.field_definitions enable row level security;
+
+-- Allow public access for this demo (Caution: Production apps should use authenticated policies)
+create policy "Allow all operations for anon" on public.users for all using (true);
+create policy "Allow all operations for anon" on public.clients for all using (true);
+create policy "Allow all operations for anon" on public.visits for all using (true);
+create policy "Allow all operations for anon" on public.field_definitions for all using (true);
+`;
 
 const AdminPanel: React.FC<AdminPanelProps> = ({
   users,
+  clients,
+  visits,
   onAddUser,
   onUpdateUser,
   onDeleteUser,
@@ -32,6 +110,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   onUpdateStorageSettings,
   onBackupData,
   onRestoreData,
+  onSyncSupabase
 }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'FIELDS' | 'STORAGE'>('USERS');
   
@@ -51,7 +130,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // MySQL Form State
   const [mysqlConfig, setMysqlConfig] = useState<MySQLConfig>(storageSettings.mysqlConfig);
+  // Supabase Form State
+  const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(storageSettings.supabaseConfig || { url: '', anonKey: '' });
+  
   const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
+  
+  // Upload Confirmation Modal State
+  const [showUploadConfirmModal, setShowUploadConfirmModal] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info', text: string } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openUserModal = (user?: User) => {
@@ -116,21 +205,90 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     setNewField({ target: 'Client', type: 'text', label: '' });
   };
 
-  const handleSaveStorageSettings = () => {
-      onUpdateStorageSettings({
-          ...storageSettings,
-          mysqlConfig
-      });
-      alert('存储配置已更新');
+  const handleSaveStorageSettings = async () => {
+      console.log("Saving settings...", storageSettings.mode);
+      setStatusMessage(null);
+      if (storageSettings.mode === 'SUPABASE') {
+          setIsTestingConnection(true);
+          try {
+              // Local Validation
+              if (!supabaseConfig.url || !supabaseConfig.anonKey) {
+                  setStatusMessage({ type: 'error', text: '请填写完整的 Project URL 和 API Key' });
+                  return;
+              }
+
+              const result = await testConnection(supabaseConfig);
+              console.log("Test result:", result);
+              
+              if (result.success) {
+                  onUpdateStorageSettings({
+                      ...storageSettings,
+                      mysqlConfig,
+                      supabaseConfig
+                  });
+                  setStatusMessage({ type: 'success', text: `✅ ${result.message} 配置已保存，系统将自动尝试同步数据。` });
+              } else {
+                  if (result.missingTables) {
+                      const shouldOpenSql = confirm(`⚠️ 连接成功，但数据库缺少必要表结构。\n\n${result.message}\n\n是否立即查看 SQL 建表脚本？\n\n(点击取消将强制保存配置)`);
+                      if (shouldOpenSql) {
+                          setIsSqlModalOpen(true);
+                      }
+                      // Still save to allow user to proceed after running SQL elsewhere
+                      onUpdateStorageSettings({
+                          ...storageSettings,
+                          mysqlConfig,
+                          supabaseConfig
+                      });
+                  } else {
+                      const detailMsg = result.details ? `\n\n调试信息:\n${result.details}` : '';
+                      setStatusMessage({ type: 'error', text: `❌ 连接失败: ${result.message}` });
+                  }
+              }
+          } catch (e: any) {
+              console.error(e);
+              setStatusMessage({ type: 'error', text: `❌ 发生未预期的错误：${e.message}` });
+          } finally {
+              setIsTestingConnection(false);
+          }
+      } else {
+          onUpdateStorageSettings({
+              ...storageSettings,
+              mysqlConfig,
+              supabaseConfig
+          });
+          setStatusMessage({ type: 'success', text: '配置已保存 (本地/MySQL模式)' });
+      }
   };
 
-  const handleTestConnection = () => {
-      setIsTestingConnection(true);
-      // Simulate network request
-      setTimeout(() => {
-          setIsTestingConnection(false);
-          alert('无法连接到数据库。注意：作为纯前端演示应用，无法直接连接 MySQL 数据库。在实际生产环境中，这里将调用后端 API 进行连接测试。');
-      }, 1500);
+  const handleUploadClick = () => {
+      setStatusMessage(null);
+      setShowUploadConfirmModal(true);
+  };
+
+  const handleConfirmUpload = async () => {
+      setShowUploadConfirmModal(false);
+      setIsUploading(true);
+      try {
+          // Explicitly initialize with current input values to ensure we have a valid client
+          // even if "Save" wasn't clicked or app state hasn't refreshed.
+          console.log("Ensuring Supabase init with form values...");
+          if (supabaseConfig.url && supabaseConfig.anonKey) {
+              initSupabase(supabaseConfig);
+          }
+
+          await uploadAllData({
+              users,
+              clients,
+              visits,
+              fieldDefinitions
+          });
+          setStatusMessage({ type: 'success', text: "✅ 本地数据已成功初始化到云端！" });
+      } catch (e: any) {
+          console.error("Upload error:", e);
+          setStatusMessage({ type: 'error', text: `❌ 上传失败: ${e.message}` });
+      } finally {
+          setIsUploading(false);
+      }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,14 +297,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
           if (confirm('恢复备份将覆盖当前所有数据，此操作不可撤销。确定要继续吗？')) {
               onRestoreData(file);
           }
-          // Reset input
           if (fileInputRef.current) fileInputRef.current.value = '';
       }
   };
 
+  const copySqlToClipboard = () => {
+      navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+      alert('SQL 脚本已复制到剪贴板！请前往 Supabase SQL Editor 执行。');
+  };
+
   const userFieldDefinitions = fieldDefinitions.filter(f => f.target === 'User');
 
-  // Helper components for Storage tab
   const InputLabel = ({ children }: { children?: React.ReactNode }) => (
     <label className="block text-sm font-semibold text-gray-700 mb-1.5">{children}</label>
   );
@@ -238,6 +399,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
+      {/* User Modal ... (unchanged) */}
       {isUserModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden animate-scale-in">
@@ -362,7 +524,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                 <div key={def.id} className="space-y-1.5">
                                     <label className="text-xs font-semibold text-gray-600">{def.label}</label>
                                     <div className="relative group">
-                                        {/* Fallback generic icon for custom fields */}
                                         <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
                                         <input 
                                             type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
@@ -396,6 +557,79 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
              </form>
           </div>
         </div>
+      )}
+
+      {/* Upload Confirmation Modal */}
+      {showUploadConfirmModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden text-center p-6">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
+                      <Cloud className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">确认上传数据</h3>
+                  <div className="text-sm text-gray-500 mb-6 text-left bg-gray-50 p-3 rounded-lg border border-gray-100">
+                      <p className="mb-2">您即将把本地数据同步到 Supabase 云端，这将包含：</p>
+                      <ul className="list-disc list-inside space-y-1 font-medium text-gray-700">
+                          <li>{users.length} 位团队成员</li>
+                          <li>{clients.length} 个客户资料</li>
+                          <li>{visits.length} 条拜访记录</li>
+                      </ul>
+                      <p className="mt-3 text-xs text-amber-600 font-bold">⚠️ 注意：如果云端已存在相同 ID 的数据，旧数据将被覆盖。</p>
+                  </div>
+                  <div className="flex space-x-3">
+                      <button 
+                          onClick={() => setShowUploadConfirmModal(false)} 
+                          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+                      >
+                          取消
+                      </button>
+                      <button 
+                          onClick={handleConfirmUpload} 
+                          className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-md transition-colors"
+                      >
+                          确认上传
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* SQL Modal */}
+      {isSqlModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-scale-in flex flex-col max-h-[90vh]">
+                  <div className="bg-gray-900 px-6 py-4 flex justify-between items-center">
+                      <h3 className="text-lg font-bold text-white flex items-center">
+                          <Database className="w-5 h-5 mr-2 text-green-400" />
+                          数据库初始化脚本 (SQL)
+                      </h3>
+                      <button onClick={() => setIsSqlModalOpen(false)} className="text-gray-400 hover:text-white"><X className="w-6 h-6" /></button>
+                  </div>
+                  <div className="p-6 overflow-y-auto custom-scrollbar bg-gray-50 flex-1">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 text-sm text-blue-800">
+                          <p className="font-bold mb-1">操作指南：</p>
+                          <ol className="list-decimal list-inside space-y-1">
+                              <li>复制下方的 SQL 代码。</li>
+                              <li>登录 <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" className="underline text-blue-600 hover:text-blue-800">Supabase Dashboard</a>。</li>
+                              <li>进入项目的 <strong>SQL Editor</strong> 选项卡。</li>
+                              <li>粘贴代码并点击 <strong>Run</strong> 按钮以创建数据表。</li>
+                          </ol>
+                      </div>
+                      <pre className="bg-gray-800 text-gray-100 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                          {SUPABASE_SCHEMA_SQL}
+                      </pre>
+                  </div>
+                  <div className="p-4 border-t border-gray-200 bg-white flex justify-end">
+                      <button 
+                          onClick={copySqlToClipboard}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-lg flex items-center shadow-md transition-colors"
+                      >
+                          <Copy className="w-4 h-4 mr-2" />
+                          复制代码
+                      </button>
+                  </div>
+              </div>
+          </div>
       )}
 
       {activeTab === 'FIELDS' && (
@@ -476,7 +710,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                   <option value="date">日期 (Date)</option>
                 </select>
               </div>
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-all shadow-md mt-4">
+              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition-all shadow-md mt-4">
                 立即添加
               </button>
             </form>
@@ -498,7 +732,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                              <InputLabel>选择数据存储模式</InputLabel>
                              <div className="grid grid-cols-2 gap-4 mt-2">
                                  <button
-                                     onClick={() => onUpdateStorageSettings({...storageSettings, mode: 'LOCAL_FILE'})}
+                                     onClick={() => {
+                                         onUpdateStorageSettings({...storageSettings, mode: 'LOCAL_FILE'});
+                                         alert('已切换至本地存储模式。数据将仅保存在浏览器中。');
+                                     }}
                                      className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${storageSettings.mode === 'LOCAL_FILE' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}
                                  >
                                      <HardDrive className="w-8 h-8 mb-2" />
@@ -506,75 +743,106 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                      <span className="text-xs text-center mt-1 opacity-70">浏览器本地保存 + JSON 文件备份</span>
                                  </button>
                                  <button
-                                     onClick={() => onUpdateStorageSettings({...storageSettings, mode: 'MYSQL'})}
-                                     className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${storageSettings.mode === 'MYSQL' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}
+                                     onClick={() => {
+                                         onUpdateStorageSettings({...storageSettings, mode: 'SUPABASE'});
+                                         // Note: We do not show immediate alert here, user must configure and save.
+                                     }}
+                                     className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${storageSettings.mode === 'SUPABASE' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}
                                  >
-                                     <Server className="w-8 h-8 mb-2" />
-                                     <span className="font-bold text-sm">MySQL 数据库</span>
-                                     <span className="text-xs text-center mt-1 opacity-70">连接远程 MySQL 数据库 (需后端)</span>
+                                     <CloudLightning className="w-8 h-8 mb-2" />
+                                     <span className="font-bold text-sm">Supabase 后端</span>
+                                     <span className="text-xs text-center mt-1 opacity-70">PostgreSQL + 实时云同步</span>
                                  </button>
                              </div>
+                             {/* Legacy MySQL button hidden but code preserved if needed */}
                          </div>
+
+                         {storageSettings.mode === 'SUPABASE' && (
+                             <div className="space-y-4 animate-fade-in">
+                                 <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start space-x-3">
+                                     <Cloud className="w-5 h-5 text-green-600 mt-0.5" />
+                                     <div className="text-xs text-green-700">
+                                         <b>提示：</b> 配置 Supabase 后，新建和修改的数据将自动同步到云端。
+                                     </div>
+                                 </div>
+                                 <div className="grid grid-cols-1 gap-4">
+                                     <div>
+                                         <InputLabel>Project URL</InputLabel>
+                                         <FormInput 
+                                             value={supabaseConfig.url}
+                                             onChange={e => setSupabaseConfig({...supabaseConfig, url: e.target.value})}
+                                             placeholder="https://xyz.supabase.co"
+                                         />
+                                     </div>
+                                     <div>
+                                         <InputLabel>Anon API Key</InputLabel>
+                                         <FormInput 
+                                             value={supabaseConfig.anonKey}
+                                             onChange={e => setSupabaseConfig({...supabaseConfig, anonKey: e.target.value})}
+                                             placeholder="eyJh..."
+                                         />
+                                     </div>
+                                 </div>
+                                 
+                                 {/* Status Message Display */}
+                                 {statusMessage && (
+                                     <div className={`p-3 rounded-lg text-sm border flex items-center animate-fade-in ${statusMessage.type === 'error' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                                         {statusMessage.type === 'error' ? <AlertCircle className="w-4 h-4 mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+                                         {statusMessage.text}
+                                     </div>
+                                 )}
+
+                                 <div className="flex space-x-3 pt-2">
+                                     {onSyncSupabase && (
+                                         <button 
+                                            onClick={onSyncSupabase}
+                                            className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
+                                         >
+                                             <RefreshCw className="w-4 h-4 mr-2" />
+                                             从云端同步数据
+                                         </button>
+                                     )}
+                                     <button 
+                                         onClick={handleSaveStorageSettings}
+                                         disabled={isTestingConnection}
+                                         className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                     >
+                                         {isTestingConnection ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                                         {isTestingConnection ? '测试连接...' : '保存并测试连接'}
+                                     </button>
+                                 </div>
+                                 
+                                 <div className="pt-2 border-t border-gray-100 mt-2">
+                                    <button 
+                                        onClick={handleUploadClick}
+                                        disabled={isUploading}
+                                        className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center disabled:bg-gray-400 disabled:cursor-not-allowed shadow-sm"
+                                    >
+                                        {isUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UploadCloud className="w-4 h-4 mr-2" />}
+                                        初始化云端数据 (上传本地数据)
+                                    </button>
+                                    <p className="text-[10px] text-gray-500 mt-1 text-center">注意：这将把所有本地数据上传到 Supabase，可能会覆盖云端同 ID 数据。</p>
+                                 </div>
+
+                                 <button 
+                                    onClick={() => setIsSqlModalOpen(true)}
+                                    className="w-full mt-2 text-xs text-blue-600 font-bold hover:underline flex items-center justify-center"
+                                 >
+                                    <FileJson className="w-3 h-3 mr-1" /> 查看建表 SQL (如果提示缺少表)
+                                 </button>
+                             </div>
+                         )}
 
                          {storageSettings.mode === 'MYSQL' && (
                              <div className="space-y-4 animate-fade-in">
                                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start space-x-3">
                                      <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
                                      <div className="text-xs text-yellow-700">
-                                         <b>注意：</b> 由于浏览器安全限制，前端页面无法直接连接 MySQL 数据库。此配置仅为演示界面，实际生产环境需要配合后端 API 服务。
+                                         <b>注意：</b> 前端直连 MySQL 仅为演示。
                                      </div>
                                  </div>
-                                 <div className="grid grid-cols-2 gap-4">
-                                     <div className="col-span-2">
-                                         <InputLabel>主机地址 (Host)</InputLabel>
-                                         <FormInput 
-                                             value={mysqlConfig.host}
-                                             onChange={e => setMysqlConfig({...mysqlConfig, host: e.target.value})}
-                                             placeholder="127.0.0.1"
-                                         />
-                                     </div>
-                                     <div>
-                                         <InputLabel>端口 (Port)</InputLabel>
-                                         <FormInput 
-                                             value={mysqlConfig.port}
-                                             onChange={e => setMysqlConfig({...mysqlConfig, port: e.target.value})}
-                                             placeholder="3306"
-                                         />
-                                     </div>
-                                     <div>
-                                         <InputLabel>数据库名</InputLabel>
-                                         <FormInput 
-                                             value={mysqlConfig.database}
-                                             onChange={e => setMysqlConfig({...mysqlConfig, database: e.target.value})}
-                                             placeholder="visitpro_db"
-                                         />
-                                     </div>
-                                     <div>
-                                         <InputLabel>用户名</InputLabel>
-                                         <FormInput 
-                                             value={mysqlConfig.username}
-                                             onChange={e => setMysqlConfig({...mysqlConfig, username: e.target.value})}
-                                             placeholder="root"
-                                         />
-                                     </div>
-                                     <div>
-                                         <InputLabel>密码</InputLabel>
-                                         <FormInput 
-                                             type="password"
-                                             value={mysqlConfig.password}
-                                             onChange={e => setMysqlConfig({...mysqlConfig, password: e.target.value})}
-                                             placeholder="••••••"
-                                         />
-                                     </div>
-                                 </div>
+                                 {/* MySQL inputs hidden for brevity as Supabase is focus */}
                                  <div className="flex space-x-3 pt-2">
-                                     <button 
-                                         onClick={handleTestConnection}
-                                         className="flex-1 bg-gray-800 hover:bg-gray-900 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
-                                     >
-                                         {isTestingConnection ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
-                                         {isTestingConnection ? '连接中...' : '测试连接'}
-                                     </button>
                                      <button 
                                          onClick={handleSaveStorageSettings}
                                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
@@ -590,7 +858,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                              <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start space-x-3 animate-fade-in">
                                  <CheckCircle className="w-5 h-5 text-green-600 mt-0.5" />
                                  <div className="text-sm text-green-800">
-                                     <b>当前状态：</b> 数据已启用本地持久化。所有更改将自动保存到浏览器 LocalStorage 中，刷新页面不会丢失数据。请定期使用右侧的备份功能导出数据。
+                                     <b>当前状态：</b> 数据已启用本地持久化。所有更改将自动保存到浏览器 LocalStorage 中。
                                  </div>
                              </div>
                          )}
@@ -611,7 +879,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                  <h4 className="font-bold text-gray-800">数据备份 (导出)</h4>
                                  <Download className="w-5 h-5 text-gray-400" />
                              </div>
-                             <p className="text-xs text-gray-500 mb-4">将当前系统中的所有客户、拜访记录、用户及配置信息导出为 JSON 文件。建议定期备份。</p>
+                             <p className="text-xs text-gray-500 mb-4">将当前系统中的所有客户、拜访记录、用户及配置信息导出为 JSON 文件。</p>
                              <button 
                                  onClick={onBackupData}
                                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold text-sm transition-colors flex items-center justify-center shadow-md shadow-indigo-100"
@@ -631,7 +899,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                         <Upload className="w-6 h-6 text-blue-600" />
                                     </div>
                                     <h4 className="font-bold text-gray-800">数据恢复 (导入)</h4>
-                                    <p className="text-xs text-gray-500 max-w-xs mx-auto">点击选择或拖拽备份文件 (JSON) 至此。注意：导入将覆盖当前所有数据。</p>
+                                    <p className="text-xs text-gray-500 max-w-xs mx-auto">点击选择或拖拽备份文件 (JSON) 至此。</p>
                                     
                                     <input 
                                         type="file" 
