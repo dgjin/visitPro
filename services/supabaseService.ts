@@ -329,8 +329,7 @@ export const addClient = async (client: Client) => {
 
 export const updateClient = async (client: Client) => {
   if (!supabase) throw new Error("数据库连接未初始化。请检查 Supabase 配置。");
-  // Use UPSERT to ensure data is saved even if it exists locally but not on backend yet
-  const { error } = await supabase.from('clients').upsert(mapClientToDb(client));
+  const { error } = await supabase.from('clients').update(mapClientToDb(client)).eq('id', client.id);
   if (error) throw new Error(`更新客户失败: ${error.message}`);
 };
 
@@ -348,8 +347,7 @@ export const addVisit = async (visit: Visit) => {
 
 export const updateVisit = async (visit: Visit) => {
   if (!supabase) throw new Error("数据库连接未初始化。请检查 Supabase 配置。");
-  // Use UPSERT for robustness
-  const { error } = await supabase.from('visits').upsert(mapVisitToDb(visit));
+  const { error } = await supabase.from('visits').update(mapVisitToDb(visit)).eq('id', visit.id);
   if (error) throw new Error(`更新拜访记录失败: ${error.message}`);
 };
 
@@ -367,8 +365,7 @@ export const addUser = async (user: User) => {
 
 export const updateUser = async (user: User) => {
   if (!supabase) throw new Error("数据库连接未初始化。请检查 Supabase 配置。");
-  // Use UPSERT for robustness
-  const { error } = await supabase.from('users').upsert(mapUserToDb(user));
+  const { error } = await supabase.from('users').update(mapUserToDb(user)).eq('id', user.id);
   if (error) throw new Error(`更新用户失败: ${error.message}`);
 };
 

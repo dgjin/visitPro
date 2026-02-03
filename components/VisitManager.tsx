@@ -94,6 +94,16 @@ const VisitManager: React.FC<VisitManagerProps> = ({
     }
   }, [selectedClientId, clients, fieldDefinitions]);
 
+  // Cleanup audio player on unmount
+  useEffect(() => {
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+    };
+  }, []);
+
   const handleEditVisit = (id: string) => {
     const visit = visits.find(v => v.id === id);
     if (visit) {
@@ -234,6 +244,31 @@ const VisitManager: React.FC<VisitManagerProps> = ({
     }
     // Reset input
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const toggleAudio = (attachment: Attachment) => {
+    if (playingAudioId === attachment.id) {
+      // Pause if currently playing this audio
+      audioPlayerRef.current?.pause();
+      setPlayingAudioId(null);
+    } else {
+      // Setup new audio
+      if (!audioPlayerRef.current) {
+        audioPlayerRef.current = new Audio();
+        audioPlayerRef.current.onended = () => setPlayingAudioId(null);
+        audioPlayerRef.current.onerror = (e) => {
+            console.error("Audio playback error", e);
+            alert("无法播放该音频");
+            setPlayingAudioId(null);
+        };
+      }
+      audioPlayerRef.current.src = attachment.url;
+      audioPlayerRef.current.play().catch(e => {
+          console.error("Play error", e);
+          setPlayingAudioId(null);
+      });
+      setPlayingAudioId(attachment.id);
+    }
   };
 
   const handleAIAnalysis = async () => {
@@ -501,13 +536,34 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                        <div className="pt-4 border-t border-gray-100">
                            <label className="block text-sm font-bold text-gray-700 uppercase tracking-wide mb-3">附件</label>
                            <div className="flex flex-wrap gap-2 mb-3">
-                               {existingAttachments.map((att, idx) => (
-                                   <div key={att.id} className="relative group bg-gray-50 border border-gray-200 rounded-lg p-2 pr-8 flex items-center">
-                                       {att.type === 'image' ? <ImageIcon className="w-4 h-4 mr-2 text-blue-500" /> : <FileText className="w-4 h-4 mr-2 text-gray-500" />}
-                                       <span className="text-xs truncate max-w-[100px]">{att.name}</span>
-                                       <button onClick={() => setExistingAttachments(prev => prev.filter(a => a.id !== att.id))} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-1"><X className="w-3 h-3" /></button>
-                                   </div>
-                               ))}
+                               {existingAttachments.map((att, idx) => {
+                                   const isAudio = att.url.startsWith('data:audio') || att.name.includes('语音') || att.name.endsWith('.webm') || att.name.endsWith('.mp3');
+                                   const isPlaying = playingAudioId === att.id;
+                                   
+                                   return (
+                                       <div key={att.id} className={`relative group border rounded-lg p-2 pr-8 flex items-center transition-all ${isAudio ? (isPlaying ? 'bg-indigo-100 border-indigo-300 ring-2 ring-indigo-200' : 'bg-indigo-50 border-indigo-200') : 'bg-gray-50 border-gray-200'}`}>
+                                           {isAudio ? (
+                                               <button 
+                                                   onClick={(e) => { e.preventDefault(); toggleAudio(att); }}
+                                                   className={`mr-2 p-1 rounded-full transition-colors ${isPlaying ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-100'}`}
+                                               >
+                                                   {isPlaying ? <Pause className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current ml-0.5" />}
+                                               </button>
+                                           ) : (
+                                               att.type === 'image' ? <ImageIcon className="w-4 h-4 mr-2 text-blue-500" /> : <FileText className="w-4 h-4 mr-2 text-gray-500" />
+                                           )}
+                                           <span className={`text-xs truncate max-w-[120px] font-medium ${isAudio ? 'text-indigo-900' : 'text-gray-700'}`}>{att.name}</span>
+                                           {isAudio && isPlaying && (
+                                                <span className="flex space-x-0.5 ml-2 h-3 items-end">
+                                                   <span className="w-0.5 bg-indigo-500 animate-[bounce_1s_infinite] h-2"></span>
+                                                   <span className="w-0.5 bg-indigo-500 animate-[bounce_1.2s_infinite] h-3"></span>
+                                                   <span className="w-0.5 bg-indigo-500 animate-[bounce_0.8s_infinite] h-1.5"></span>
+                                                </span>
+                                           )}
+                                           <button onClick={() => setExistingAttachments(prev => prev.filter(a => a.id !== att.id))} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-1"><X className="w-3 h-3" /></button>
+                                       </div>
+                                   );
+                               })}
                            </div>
                            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
                            <button onClick={() => fileInputRef.current?.click()} className="w-full border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-500 hover:text-blue-600 rounded-lg p-3 text-sm font-medium transition-all flex items-center justify-center">

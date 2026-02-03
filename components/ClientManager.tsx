@@ -73,8 +73,17 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
     }));
 
     if (editingClient.id) {
+        // Explicitly construct updated object to ensure data integrity
         const updated: Client = {
-            ...editingClient as Client,
+            id: editingClient.id!, // Ensure ID is present
+            name: editingClient.name!,
+            company: editingClient.company!,
+            email: editingClient.email || '',
+            phone: editingClient.phone || '',
+            address: editingClient.address || '',
+            industry: editingClient.industry || '',
+            status: (editingClient.status as any) || 'Active',
+            avatarUrl: editingClient.avatarUrl || `https://picsum.photos/seed/${editingClient.name}/200`,
             customFields: customFieldsData
         };
         onUpdateClient(updated);

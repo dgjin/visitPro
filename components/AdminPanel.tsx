@@ -212,37 +212,34 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleSaveStorageSettings = async () => {
       setStatusMessage(null);
-      if (storageSettings.mode === 'SUPABASE') {
-          setIsTestingConnection(true);
-          try {
-              if (!supabaseConfig.url || !supabaseConfig.anonKey) {
-                  setStatusMessage({ type: 'error', text: '请填写完整的 Project URL 和 API Key' });
-                  return;
-              }
-              const result = await testConnection(supabaseConfig);
-              if (result.success) {
-                  onUpdateStorageSettings({
-                      ...storageSettings,
-                      supabaseConfig
-                  });
-                  setStatusMessage({ type: 'success', text: `✅ ${result.message} 配置已保存。` });
-              } else {
-                  if (result.missingTables) {
-                      const shouldOpenSql = confirm(`⚠️ 连接成功，但数据库缺少必要表结构。\n\n${result.message}\n\n是否立即查看 SQL 建表脚本？`);
-                      if (shouldOpenSql) setIsSqlModalOpen(true);
-                      onUpdateStorageSettings({ ...storageSettings, supabaseConfig });
-                  } else {
-                      setStatusMessage({ type: 'error', text: `❌ 连接失败: ${result.message}` });
-                  }
-              }
-          } catch (e: any) {
-              setStatusMessage({ type: 'error', text: `❌ 错误：${e.message}` });
-          } finally {
-              setIsTestingConnection(false);
+      setIsTestingConnection(true);
+      try {
+          if (!supabaseConfig.url || !supabaseConfig.anonKey) {
+              setStatusMessage({ type: 'error', text: '请填写完整的 Project URL 和 API Key' });
+              return;
           }
-      } else {
-          onUpdateStorageSettings({ ...storageSettings, supabaseConfig });
-          setStatusMessage({ type: 'success', text: '配置已保存' });
+          const result = await testConnection(supabaseConfig);
+          if (result.success) {
+              onUpdateStorageSettings({
+                  ...storageSettings,
+                  mode: 'SUPABASE',
+                  supabaseConfig
+              });
+              setStatusMessage({ type: 'success', text: `✅ ${result.message} 配置已保存。` });
+          } else {
+              if (result.missingTables) {
+                  const shouldOpenSql = confirm(`⚠️ 连接成功，但数据库缺少必要表结构。\n\n${result.message}\n\n是否立即查看 SQL 建表脚本？`);
+                  if (shouldOpenSql) setIsSqlModalOpen(true);
+                  // Allow saving even if tables missing, so user can run SQL later
+                  onUpdateStorageSettings({ ...storageSettings, mode: 'SUPABASE', supabaseConfig });
+              } else {
+                  setStatusMessage({ type: 'error', text: `❌ 连接失败: ${result.message}` });
+              }
+          }
+      } catch (e: any) {
+          setStatusMessage({ type: 'error', text: `❌ 错误：${e.message}` });
+      } finally {
+          setIsTestingConnection(false);
       }
   };
 
@@ -433,8 +430,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                <div className="space-y-6">
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                        <h3 className="font-bold text-gray-900 mb-4 flex items-center"><Database className="w-5 h-5 mr-2 text-blue-600" /> 存储配置</h3>
+                        <h3 className="font-bold text-gray-900 mb-4 flex items-center"><Database className="w-5 h-5 mr-2 text-blue-600" /> Supabase 数据库配置</h3>
                         <div className="space-y-4">
+                             <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm text-blue-800">
+                                 系统已强制使用 Supabase 作为唯一数据存储后端。请在此配置连接信息。
+                             </div>
                              <div className="flex flex-col space-y-2">
                                  <InputLabel>Project URL</InputLabel>
                                  <FormInput value={supabaseConfig.url} onChange={e => setSupabaseConfig({...supabaseConfig, url: e.target.value})} placeholder="https://xyz.supabase.co" />
@@ -450,7 +450,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                              )}
                              <button onClick={handleSaveStorageSettings} className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center">
                                  {isTestingConnection ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                                 保存并测试
+                                 保存并测试连接
                              </button>
                         </div>
                     </div>
@@ -458,12 +458,22 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                
                <div className="space-y-6">
                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                       <h3 className="font-bold text-gray-900 mb-4 flex items-center"><Save className="w-5 h-5 mr-2 text-indigo-600" /> 备份恢复</h3>
+                       <h3 className="font-bold text-gray-900 mb-4 flex items-center"><Save className="w-5 h-5 mr-2 text-indigo-600" /> 数据迁移与备份</h3>
                        <div className="space-y-4">
-                           <button onClick={onBackupData} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 py-3 rounded-lg font-bold flex items-center justify-center"><Download className="w-4 h-4 mr-2" /> 导出备份</button>
+                           <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800">
+                               <strong>初始化云端数据：</strong> 如果您的 Supabase 数据库为空，可以点击下方按钮将本地缓存数据上传至云端。
+                           </div>
+                           <button onClick={() => setShowUploadConfirmModal(true)} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold flex items-center justify-center transition-all shadow-md">
+                               {isUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Cloud className="w-4 h-4 mr-2" />}
+                               上传本地数据到 Supabase
+                           </button>
+                           
+                           <hr className="border-gray-100 my-2"/>
+                           
+                           <button onClick={onBackupData} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 py-3 rounded-lg font-bold flex items-center justify-center"><Download className="w-4 h-4 mr-2" /> 导出 JSON 备份</button>
                            <div className="relative">
                                <input type="file" ref={fileInputRef} accept=".json" onChange={handleFileChange} className="hidden" />
-                               <button onClick={() => fileInputRef.current?.click()} className="w-full border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-600 py-3 rounded-lg font-bold flex items-center justify-center transition-all"><Upload className="w-4 h-4 mr-2" /> 导入恢复</button>
+                               <button onClick={() => fileInputRef.current?.click()} className="w-full border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-600 py-3 rounded-lg font-bold flex items-center justify-center transition-all"><Upload className="w-4 h-4 mr-2" /> 导入 JSON 恢复</button>
                            </div>
                        </div>
                    </div>
@@ -495,9 +505,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden text-center p-6">
                   <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4"><Cloud className="h-6 w-6 text-blue-600" /></div>
                   <h3 className="text-lg font-bold text-gray-900 mb-2">确认上传数据</h3>
+                  <p className="text-sm text-gray-500 mb-6">此操作将把当前本地的 {users.length} 个用户、{clients.length} 个客户和 {visits.length} 条拜访记录上传到 Supabase 数据库。已存在的 ID 将被更新，新 ID 将被创建。</p>
                   <div className="flex space-x-3 mt-6">
-                      <button onClick={() => setShowUploadConfirmModal(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700">取消</button>
-                      <button onClick={handleConfirmUpload} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg shadow-md">确认上传</button>
+                      <button onClick={() => setShowUploadConfirmModal(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">取消</button>
+                      <button onClick={handleConfirmUpload} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700">确认上传</button>
                   </div>
               </div>
           </div>
