@@ -26,7 +26,6 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
     const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
     const today = new Date();
     // Adjust to get Monday of the current week
-    // getDay(): 0 is Sunday, 1 is Monday. We want 0 to be Monday for calculation ease.
     const dayOfWeek = today.getDay(); 
     const diffToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
     
@@ -37,8 +36,6 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
     return days.map((name, index) => {
        const current = new Date(monday);
        current.setDate(monday.getDate() + index);
-       // Create YYYY-MM-DD string to match the format stored in ISO strings (approximate for local day)
-       // Using ISO slice is safe here because VisitManager saves dates as UTC 00:00 based on date picker
        const dateStr = current.toISOString().split('T')[0];
        
        const count = visits.filter(v => {
@@ -52,10 +49,42 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
 
   const data = getWeeklyData();
 
-  const getDepartmentName = (idOrName: string) => {
-    if (!idOrName) return '未分配';
-    const dept = departments.find(d => d.id === idOrName);
-    return dept ? dept.name : idOrName;
+  // Helper to get up to 3 levels of department hierarchy, avoiding ID display
+  const getDepartmentPath = (deptIdOrName: string | undefined) => {
+    if (!deptIdOrName) return '未分配';
+    
+    // 1. Try to find by ID
+    let current = departments.find(d => d.id === deptIdOrName);
+    
+    // 2. If not found, handle fallback logic
+    if (!current) {
+        // If it looks like a UUID, hide it (don't show ID to user)
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deptIdOrName);
+        if (isUUID) {
+             return '未知部门'; 
+        }
+        // It's likely a legacy name string (e.g. "Sales"), try to find object for hierarchy, else return string
+        current = departments.find(d => d.name === deptIdOrName);
+        if (!current) return deptIdOrName;
+    }
+
+    // Now we have 'current' object. Build path bottom-up.
+    const path = [current.name];
+    let parentId = current.parentId;
+    let depth = 0;
+
+    // Traverse up to 2 parent levels (total 3 levels including current)
+    while (parentId && depth < 2) {
+        const parent = departments.find(d => d.id === parentId);
+        if (parent) {
+            path.unshift(parent.name);
+            parentId = parent.parentId;
+            depth++;
+        } else {
+            break;
+        }
+    }
+    return path.join(' / ');
   };
 
   // Compute Team Stats
@@ -68,12 +97,11 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
         ? userVisits.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] 
         : null;
       
-      const displayDept = getDepartmentName(user.department);
+      const displayDept = getDepartmentPath(user.department);
 
-      // Simple display logic for role
       let displayRole = '成员';
-      if (user.role.includes('SystemAdmin')) displayRole = '管理员';
-      else if (user.role.includes('TeamLeader')) displayRole = '团队长';
+      if (user.role === 'Admin') displayRole = '管理员';
+      else if (user.role === 'TeamLeader') displayRole = '团队负责人';
 
       return {
           user,
@@ -183,7 +211,7 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
                                     </div>
                                 </td>
                                 <td className="py-3">
-                                    <span className="text-gray-600 font-medium truncate max-w-[120px] inline-block">{stat.displayDept}</span>
+                                    <span className="text-gray-600 font-medium truncate max-w-[180px] inline-block" title={stat.displayDept}>{stat.displayDept}</span>
                                 </td>
                                 <td className="py-3 text-center">
                                     <span className="font-bold text-gray-700">{stat.visitCount}</span>
@@ -218,6 +246,7 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
             <thead>
               <tr className="border-b border-gray-200 text-gray-400 uppercase tracking-tight text-[11px] font-bold">
                 <th className="pb-3 pl-1">客户名称</th>
+                <th className="pb-3">拜访人</th>
                 <th className="pb-3">拜访日期</th>
                 <th className="pb-3">分析摘要</th>
                 <th className="pb-3">反馈情绪</th>
@@ -227,6 +256,10 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
             <tbody className="divide-y divide-gray-100">
               {visits.slice(0, 5).map((visit) => {
                 const client = clients.find(c => c.id === visit.clientId);
+                const visitor = users.find(u => u.id === visit.userId);
+                const visitorName = visitor ? visitor.name : 'Unknown';
+                const visitorDept = visitor ? getDepartmentPath(visitor.department) : '';
+
                 return (
                 <tr 
                     key={visit.id} 
@@ -236,6 +269,10 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
                   <td className="py-3 pl-1">
                       <div className="font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{visit.clientName}</div>
                       {client && <div className="text-xs text-gray-500 mt-0.5">{client.company}</div>}
+                  </td>
+                  <td className="py-3">
+                      <div className="text-gray-900 font-medium text-xs">{visitorName}</div>
+                      {visitorDept && <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[150px]" title={visitorDept}>{visitorDept}</div>}
                   </td>
                   <td className="py-3 text-gray-500 tabular-nums">{new Date(visit.date).toLocaleDateString('zh-CN')}</td>
                   <td className="py-3 text-gray-500 max-w-xs truncate">{visit.summary}</td>
@@ -254,7 +291,7 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clien
               )})}
               {visits.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-gray-400 italic">暂无近期拜访记录。</td>
+                  <td colSpan={6} className="py-8 text-center text-gray-400 italic">暂无近期拜访记录。</td>
                 </tr>
               )}
             </tbody>

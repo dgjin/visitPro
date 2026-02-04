@@ -1,10 +1,12 @@
 
 import React, { useState } from 'react';
-import { Client, CustomFieldDefinition, CustomFieldData } from '../types';
-import { Search, Plus, MapPin, Building2, Phone, Mail, Pencil, Trash2, X, User, Layers, Activity, Briefcase } from 'lucide-react';
+import { Client, CustomFieldDefinition, CustomFieldData, User } from '../types';
+import { Search, Plus, MapPin, Building2, Phone, Mail, Pencil, Trash2, X, User as UserIcon, Layers, Activity, Briefcase, Lock, ShieldCheck } from 'lucide-react';
 
 interface ClientManagerProps {
   clients: Client[];
+  users: User[]; // Added users prop
+  currentUser: User;
   onAddClient: (client: Client) => void;
   onUpdateClient: (client: Client) => void;
   onDeleteClient: (id: string) => void;
@@ -35,7 +37,7 @@ const INDUSTRIES = [
   "T 国际组织"
 ];
 
-const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onUpdateClient, onDeleteClient, fieldDefinitions }) => {
+const ClientManager: React.FC<ClientManagerProps> = ({ clients, users, currentUser, onAddClient, onUpdateClient, onDeleteClient, fieldDefinitions }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Partial<Client>>({ customFields: [] });
@@ -48,6 +50,21 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
 
   const clientDefinitions = fieldDefinitions.filter(d => d.target === 'Client');
 
+  const checkPermission = (client?: Partial<Client>) => {
+      // Create new: allow
+      if (!client || !client.id) return true;
+      // Admin: allow all
+      if (currentUser.role === 'Admin') return true;
+      // Creator: allow own
+      return client.userId === currentUser.id;
+  };
+
+  const getCreatorName = (userId: string | undefined) => {
+      if (!userId) return '未知';
+      const u = users.find(user => user.id === userId);
+      return u ? u.name : '未知用户';
+  };
+
   const openModal = (client?: Client) => {
     if (client) {
       setEditingClient(client);
@@ -57,7 +74,7 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
       });
       setCustomFieldInputs(inputs);
     } else {
-      setEditingClient({ customFields: [], status: 'Active' });
+      setEditingClient({ customFields: [], status: 'Active', userId: currentUser.id }); // Default to current user for new
       setCustomFieldInputs({});
     }
     setIsModalOpen(true);
@@ -65,6 +82,7 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!checkPermission(editingClient)) return;
     if (!editingClient.name || !editingClient.company) return;
     
     const customFieldsData: CustomFieldData[] = Object.entries(customFieldInputs).map(([fieldId, value]) => ({
@@ -76,6 +94,7 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
         // Explicitly construct updated object to ensure data integrity
         const updated: Client = {
             id: editingClient.id!, // Ensure ID is present
+            userId: editingClient.userId || currentUser.id, // Preserve owner or set to current
             name: editingClient.name!,
             company: editingClient.company!,
             email: editingClient.email || '',
@@ -90,6 +109,7 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
     } else {
         const client: Client = {
             id: crypto.randomUUID(),
+            userId: currentUser.id, // Set creator
             name: editingClient.name!,
             company: editingClient.company!,
             email: editingClient.email || '',
@@ -122,6 +142,8 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
     return def ? def.label : '未知字段';
   };
 
+  const isEditingAllowed = checkPermission(editingClient);
+
   return (
     <div className="space-y-6 h-full flex flex-col">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -145,72 +167,84 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pb-4 custom-scrollbar">
-        {filteredClients.map(client => (
-          <div key={client.id} className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow p-6 flex flex-col group relative">
-            <div className="absolute top-4 right-4 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button 
-                    onClick={() => openModal(client)}
-                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                >
-                    <Pencil className="w-4 h-4" />
-                </button>
-                <button 
-                    onClick={() => onDeleteClient(client.id)}
-                    className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                >
-                    <Trash2 className="w-4 h-4" />
-                </button>
-            </div>
+        {filteredClients.map(client => {
+            const hasPerm = checkPermission(client);
+            return (
+              <div key={client.id} className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow p-6 flex flex-col group relative" onClick={() => !hasPerm && openModal(client)}>
+                {hasPerm && (
+                    <div className="absolute top-4 right-4 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); openModal(client); }}
+                            className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                        >
+                            <Pencil className="w-4 h-4" />
+                        </button>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onDeleteClient(client.id); }}
+                            className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+                {!hasPerm && (
+                    <div className="absolute top-4 right-4 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Lock className="w-4 h-4" />
+                    </div>
+                )}
 
-            <div className="flex items-center space-x-4 mb-4">
-                <img src={client.avatarUrl} alt={client.name} className="w-16 h-16 rounded-full bg-gray-100 object-cover border-2 border-white shadow-sm" />
-                <div>
-                    <h3 className="font-bold text-gray-900">{client.name}</h3>
-                    <p className="text-sm text-gray-500">{client.company}</p>
-                    <span className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-bold ${client.status === 'Active' ? 'bg-green-100 text-green-700' : client.status === 'Lead' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {translateStatus(client.status)}
-                    </span>
+                <div className="flex items-center space-x-4 mb-4">
+                    <img src={client.avatarUrl} alt={client.name} className="w-16 h-16 rounded-full bg-gray-100 object-cover border-2 border-white shadow-sm" />
+                    <div>
+                        <h3 className="font-bold text-gray-900">{client.name}</h3>
+                        <p className="text-sm text-gray-500">{client.company}</p>
+                        <span className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-bold ${client.status === 'Active' ? 'bg-green-100 text-green-700' : client.status === 'Lead' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {translateStatus(client.status)}
+                        </span>
+                    </div>
                 </div>
-            </div>
 
-            <div className="space-y-2 text-sm text-gray-600 flex-1">
-                <div className="flex items-center space-x-2">
-                    <Layers className="w-4 h-4 text-gray-400" />
-                    <span className="truncate" title={client.industry}>{client.industry || '未分类'}</span>
+                <div className="space-y-2 text-sm text-gray-600 flex-1">
+                    <div className="flex items-center space-x-2">
+                        <Layers className="w-4 h-4 text-gray-400" />
+                        <span className="truncate" title={client.industry}>{client.industry || '未分类'}</span>
+                    </div>
+                    {client.email && (
+                        <div className="flex items-center space-x-2">
+                            <Mail className="w-4 h-4 text-gray-400" />
+                            <span className="truncate">{client.email}</span>
+                        </div>
+                    )}
+                    {client.phone && (
+                        <div className="flex items-center space-x-2">
+                            <Phone className="w-4 h-4 text-gray-400" />
+                            <span>{client.phone}</span>
+                        </div>
+                    )}
+                    
+                    {/* Creator Display in List */}
+                    <div className="flex items-center space-x-2 pt-2 mt-2 border-t border-gray-50">
+                        <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                        <span className="text-xs text-indigo-600 font-medium bg-indigo-50 px-2 py-0.5 rounded">
+                            录入人: {getCreatorName(client.userId)}
+                        </span>
+                    </div>
+                    
+                    {/* Custom Fields Display */}
+                    {client.customFields && client.customFields.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-gray-50 grid grid-cols-2 gap-2">
+                            {client.customFields.map(cf => (
+                                <div key={cf.fieldId} className="text-xs">
+                                    <span className="text-gray-400 block mb-0.5">{getFieldLabel(cf.fieldId)}</span>
+                                    <span className="text-gray-700 font-medium">{cf.value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
-                {client.email && (
-                    <div className="flex items-center space-x-2">
-                        <Mail className="w-4 h-4 text-gray-400" />
-                        <span className="truncate">{client.email}</span>
-                    </div>
-                )}
-                {client.phone && (
-                    <div className="flex items-center space-x-2">
-                        <Phone className="w-4 h-4 text-gray-400" />
-                        <span>{client.phone}</span>
-                    </div>
-                )}
-                {client.address && (
-                    <div className="flex items-center space-x-2">
-                        <MapPin className="w-4 h-4 text-gray-400" />
-                        <span className="truncate">{client.address}</span>
-                    </div>
-                )}
-                
-                {/* Custom Fields Display */}
-                {client.customFields && client.customFields.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-gray-50 grid grid-cols-2 gap-2">
-                        {client.customFields.map(cf => (
-                            <div key={cf.fieldId} className="text-xs">
-                                <span className="text-gray-400 block mb-0.5">{getFieldLabel(cf.fieldId)}</span>
-                                <span className="text-gray-700 font-medium">{cf.value}</span>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-          </div>
-        ))}
+              </div>
+            );
+        })}
         {filteredClients.length === 0 && (
             <div className="col-span-full text-center py-12 text-gray-500">
                 未找到相关客户。
@@ -223,8 +257,8 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden animate-scale-in">
                 <div className="bg-gray-900 px-6 py-4 flex justify-between items-center border-b border-gray-800">
                     <h3 className="text-lg font-bold text-white flex items-center">
-                        <User className="w-5 h-5 mr-2 text-blue-400" />
-                        {editingClient.id ? '编辑客户资料' : '添加新客户'}
+                        <UserIcon className="w-5 h-5 mr-2 text-blue-400" />
+                        {editingClient.id ? (isEditingAllowed ? '编辑客户资料' : '查看客户资料') : '添加新客户'}
                     </h3>
                     <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white transition-colors hover:bg-gray-800 p-1 rounded-lg">
                         <X className="w-6 h-6" />
@@ -232,7 +266,13 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                 </div>
                 
                 <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
-                    
+                    {!isEditingAllowed && (
+                        <div className="bg-yellow-50 text-yellow-700 px-4 py-3 rounded-lg text-sm flex items-center border border-yellow-100">
+                             <Lock className="w-4 h-4 mr-2" />
+                             您没有权限编辑此客户信息。
+                        </div>
+                    )}
+
                     {/* Basic Information Section */}
                     <div className="space-y-4">
                         <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2 flex items-center">
@@ -240,11 +280,23 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                         </h4>
                         <div className="grid grid-cols-2 gap-5">
                             <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-gray-600">录入人 (系统自动)</label>
+                                <div className="relative group">
+                                    <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <input 
+                                        disabled
+                                        className="w-full pl-9 pr-3 py-2.5 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-500 cursor-not-allowed" 
+                                        value={getCreatorName(editingClient.userId)} 
+                                    />
+                                </div>
+                            </div>
+                            <div className="space-y-1.5">
                                 <label className="text-xs font-semibold text-gray-600">姓名 <span className="text-red-500">*</span></label>
                                 <div className="relative group">
-                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-                                    <input required className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+                                    <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                    <input required className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500" 
                                         placeholder="客户姓名"
+                                        disabled={!isEditingAllowed}
                                         value={editingClient.name || ''} 
                                         onChange={e => setEditingClient({...editingClient, name: e.target.value})} 
                                     />
@@ -254,8 +306,9 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                                 <label className="text-xs font-semibold text-gray-600">公司 <span className="text-red-500">*</span></label>
                                 <div className="relative group">
                                     <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-                                    <input required className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+                                    <input required className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500" 
                                         placeholder="所属公司"
+                                        disabled={!isEditingAllowed}
                                         value={editingClient.company || ''} 
                                         onChange={e => setEditingClient({...editingClient, company: e.target.value})} 
                                     />
@@ -266,8 +319,9 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                                  <div className="relative group">
                                     <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
                                     <select 
-                                        className="w-full pl-9 pr-8 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none cursor-pointer" 
+                                        className="w-full pl-9 pr-8 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none cursor-pointer disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" 
                                         value={editingClient.industry || ''} 
+                                        disabled={!isEditingAllowed}
                                         onChange={e => setEditingClient({...editingClient, industry: e.target.value})}
                                     >
                                         <option value="">选择行业分类...</option>
@@ -285,8 +339,9 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                                  <div className="relative group">
                                      <Activity className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
                                      <select 
-                                        className="w-full pl-9 pr-8 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none cursor-pointer" 
+                                        className="w-full pl-9 pr-8 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none cursor-pointer disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" 
                                         value={editingClient.status} 
+                                        disabled={!isEditingAllowed}
                                         onChange={e => setEditingClient({...editingClient, status: e.target.value as any})}
                                      >
                                          <option value="Active">活跃 (Active)</option>
@@ -311,8 +366,9 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                                 <label className="text-xs font-semibold text-gray-600">电子邮箱</label>
                                 <div className="relative group">
                                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-                                    <input type="email" className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+                                    <input type="email" className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500" 
                                         placeholder="name@company.com"
+                                        disabled={!isEditingAllowed}
                                         value={editingClient.email || ''} 
                                         onChange={e => setEditingClient({...editingClient, email: e.target.value})} 
                                     />
@@ -322,8 +378,9 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                                 <label className="text-xs font-semibold text-gray-600">联系电话</label>
                                 <div className="relative group">
                                     <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-                                    <input className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+                                    <input className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500" 
                                         placeholder="电话号码"
+                                        disabled={!isEditingAllowed}
                                         value={editingClient.phone || ''} 
                                         onChange={e => setEditingClient({...editingClient, phone: e.target.value})} 
                                     />
@@ -333,8 +390,9 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                                 <label className="text-xs font-semibold text-gray-600">办公地址</label>
                                 <div className="relative group">
                                     <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-                                    <input className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+                                    <input className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500" 
                                         placeholder="详细办公地址"
+                                        disabled={!isEditingAllowed}
                                         value={editingClient.address || ''} 
                                         onChange={e => setEditingClient({...editingClient, address: e.target.value})} 
                                     />
@@ -357,8 +415,9 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                                             <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
                                             <input 
                                                 type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
-                                                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500"
                                                 value={customFieldInputs[def.id] || ''}
+                                                disabled={!isEditingAllowed}
                                                 onChange={e => setCustomFieldInputs({...customFieldInputs, [def.id]: e.target.value})}
                                                 placeholder={`输入${def.label}...`}
                                             />
@@ -370,8 +429,12 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, onAddClient, onU
                     )}
 
                     <div className="pt-6 flex space-x-3 border-t border-gray-100">
-                        <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 font-bold py-3 rounded-xl transition-colors">取消</button>
-                        <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-blue-100">保存信息</button>
+                        <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 font-bold py-3 rounded-xl transition-colors">
+                            {isEditingAllowed ? '取消' : '关闭'}
+                        </button>
+                        {isEditingAllowed && (
+                            <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-blue-100">保存信息</button>
+                        )}
                     </div>
                 </form>
             </div>

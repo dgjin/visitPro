@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { User, CustomFieldDefinition, StorageSettings, SupabaseConfig, Client, Visit, Department, UserRole } from '../types';
-import { Users, Settings, Plus, Trash2, Database, Save, Upload, Download, Cloud, Copy, Loader2, X, Phone, Mail, Briefcase, User as UserIcon, FolderTree, ChevronRight, ChevronDown, Folder, FileJson, CheckSquare, Square } from 'lucide-react';
+import { User, CustomFieldDefinition, StorageSettings, SupabaseConfig, Client, Visit, Department } from '../types';
+import { Users, Settings, Plus, Trash2, Database, Save, Upload, Download, Cloud, Copy, Loader2, X, Phone, Mail, Briefcase, User as UserIcon, FolderTree, ChevronRight, ChevronDown, Folder, FileJson, Search } from 'lucide-react';
 import { testConnection, uploadAllData, initSupabase } from '../services/supabaseService';
 
 interface AdminPanelProps {
@@ -11,7 +11,7 @@ interface AdminPanelProps {
   onAddUser: (user: User) => void;
   onUpdateUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
-  onUpdateUserRole: (userId: string, role: UserRole[]) => void;
+  onUpdateUserRole: (userId: string, role: 'Admin' | 'TeamLeader' | 'Member') => void;
   fieldDefinitions: CustomFieldDefinition[];
   onAddField: (field: CustomFieldDefinition) => void;
   onDeleteField: (fieldId: string) => void;
@@ -35,20 +35,22 @@ create table if not exists public.users (
   email text,
   phone text,
   department text,
-  -- team_name column removed in V1.2
   role text,
   avatar_url text,
   custom_fields jsonb default '[]'::jsonb,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
--- Ensure new columns exist (Migration)
+-- Migrations for Users
 alter table public.users add column if not exists phone text;
 alter table public.users add column if not exists department text;
 alter table public.users add column if not exists role text;
+alter table public.users add column if not exists avatar_url text;
+alter table public.users add column if not exists custom_fields jsonb default '[]'::jsonb;
 
 -- 2. Clients Table
 create table if not exists public.clients (
   id text primary key,
+  user_id text, -- Owner ID
   name text,
   company text,
   email text,
@@ -60,6 +62,13 @@ create table if not exists public.clients (
   custom_fields jsonb default '[]'::jsonb,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
+-- Migrations for Clients
+alter table public.clients add column if not exists user_id text;
+alter table public.clients add column if not exists industry text;
+alter table public.clients add column if not exists status text;
+alter table public.clients add column if not exists avatar_url text;
+alter table public.clients add column if not exists custom_fields jsonb default '[]'::jsonb;
+create index if not exists idx_clients_user_id on public.clients(user_id);
 
 -- 3. Visits Table
 create table if not exists public.visits (
@@ -80,6 +89,14 @@ create table if not exists public.visits (
   attachments jsonb default '[]'::jsonb,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
+-- Migrations for Visits
+alter table public.visits add column if not exists client_name text;
+alter table public.visits add column if not exists user_id text;
+alter table public.visits add column if not exists category text;
+alter table public.visits add column if not exists attachments jsonb default '[]'::jsonb;
+alter table public.visits add column if not exists custom_fields jsonb default '[]'::jsonb;
+create index if not exists idx_visits_client_id on public.visits(client_id);
+create index if not exists idx_visits_user_id on public.visits(user_id);
 
 -- 4. Field Definitions Table (Global Config)
 create table if not exists public.field_definitions (
@@ -99,11 +116,10 @@ create table if not exists public.departments (
   description text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
-
--- Indexes for performance
-create index if not exists idx_visits_client_id on public.visits(client_id);
-create index if not exists idx_visits_user_id on public.visits(user_id);
 create index if not exists idx_departments_parent_id on public.departments(parent_id);
+
+-- IMPORTANT: Force PostgREST schema cache reload to recognize new columns immediately
+NOTIFY pgrst, 'reload config';
 `;
 
 // Move components outside to prevent remounting and focus loss
@@ -123,57 +139,62 @@ const FormInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
 const DepartmentTreeItem: React.FC<{
   dept: Department;
   allDepts: Department[];
-  depth: number;
   onEdit: (d: Department) => void;
   onDelete: (id: string) => void;
   onAddSub: (parentId: string) => void;
-}> = ({ dept, allDepts, depth, onEdit, onDelete, onAddSub }) => {
+}> = ({ dept, allDepts, onEdit, onDelete, onAddSub }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const children = allDepts.filter(d => d.parentId === dept.id);
   const hasChildren = children.length > 0;
 
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsExpanded(!isExpanded);
+  };
+
   return (
-    <div className="select-none">
+    <div className="select-none relative">
       <div 
-        className={`flex items-center group py-2 px-2 hover:bg-gray-50 rounded-lg transition-colors border border-transparent hover:border-gray-100 mb-1`}
-        style={{ marginLeft: `${depth * 20}px` }}
+        className={`flex items-center group py-1.5 px-2 hover:bg-gray-50 rounded-lg transition-all border border-transparent hover:border-gray-200 mb-0.5 cursor-pointer`}
+        onClick={() => onEdit(dept)}
       >
+        {/* Toggle Button */}
         <button 
-          onClick={() => setIsExpanded(!isExpanded)}
-          className={`p-1 rounded text-gray-400 hover:text-gray-600 mr-1 ${hasChildren ? '' : 'invisible'}`}
+          onClick={handleToggle}
+          className={`w-6 h-6 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 mr-1 transition-colors ${hasChildren ? '' : 'invisible'}`}
         >
-          {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
         </button>
         
-        <div className="flex items-center flex-1 cursor-pointer" onClick={() => onEdit(dept)}>
-           <Folder className={`w-4 h-4 mr-2 ${hasChildren ? 'text-blue-500' : 'text-gray-400'}`} />
-           <span className="text-sm font-medium text-gray-700">{dept.name}</span>
-           {dept.managerId && <span className="ml-2 text-xs bg-gray-100 text-gray-500 px-1.5 rounded">经理ID: {dept.managerId}</span>}
+        {/* Label Content */}
+        <div className="flex items-center flex-1 min-w-0 mr-2">
+           <Folder className={`w-4 h-4 mr-2 flex-shrink-0 ${hasChildren ? 'text-blue-500' : 'text-gray-400'}`} />
+           <span className="text-sm font-medium text-gray-700 truncate">{dept.name}</span>
+           {dept.managerId && <span className="ml-2 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200 flex-shrink-0 hidden sm:inline-block">Mgr: {dept.managerId}</span>}
         </div>
 
-        <div className="hidden group-hover:flex items-center space-x-1">
-             <button onClick={() => onAddSub(dept.id)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="添加子部门">
-                <Plus className="w-3 h-3" />
+        {/* Hover Actions */}
+        <div className="hidden group-hover:flex items-center space-x-0.5 bg-white/80 backdrop-blur-sm rounded-lg shadow-sm border border-gray-100 px-1">
+             <button onClick={(e) => { e.stopPropagation(); onAddSub(dept.id); }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="添加子部门">
+                <Plus className="w-3.5 h-3.5" />
              </button>
-             <button onClick={() => onEdit(dept)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded" title="编辑">
-                <Settings className="w-3 h-3" />
+             <button onClick={(e) => { e.stopPropagation(); onEdit(dept); }} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded transition-colors" title="编辑">
+                <Settings className="w-3.5 h-3.5" />
              </button>
-             <button onClick={() => onDelete(dept.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded" title="删除">
-                <Trash2 className="w-3 h-3" />
+             <button onClick={(e) => { e.stopPropagation(); onDelete(dept.id); }} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors" title="删除">
+                <Trash2 className="w-3.5 h-3.5" />
              </button>
         </div>
       </div>
       
+      {/* Nested Children with Indentation Line */}
       {isExpanded && hasChildren && (
-        <div className="relative">
-           {/* Vertical line for visual hierarchy */}
-           <div className="absolute left-[calc(20px_*_var(--depth)_+_14px)] top-0 bottom-2 w-px bg-gray-200" style={{ '--depth': depth } as any}></div>
+        <div className="ml-[11px] pl-4 border-l border-gray-200 space-y-0.5"> 
            {children.map(child => (
              <DepartmentTreeItem 
                key={child.id} 
                dept={child} 
                allDepts={allDepts} 
-               depth={depth + 1}
                onEdit={onEdit}
                onDelete={onDelete}
                onAddSub={onAddSub}
@@ -208,10 +229,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'DEPARTMENTS' | 'FIELDS' | 'STORAGE'>('USERS');
   
+  // User Search State
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+
   // User Modal State
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<Partial<User>>({ 
-    role: [], 
+    role: 'Member', // Default to Member
     department: '', 
     phone: '',
     customFields: [] 
@@ -264,25 +288,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
       return path.join(' / ');
   };
 
-  const generateNextUserId = () => {
-    // Filter existing IDs that match the EMP-XXX pattern
-    const pattern = /^EMP-(\d{3})$/;
-    const existingIds = users.map(u => u.id);
-    let maxNum = 0;
-    
-    existingIds.forEach(id => {
-      const match = id.match(pattern);
-      if (match) {
-        const num = parseInt(match[1], 10);
-        if (!isNaN(num) && num > maxNum) {
-          maxNum = num;
-        }
-      }
-    });
-
-    const nextNum = maxNum + 1;
-    return `EMP-${String(nextNum).padStart(3, '0')}`;
-  };
+  // Filter Users Logic
+  const filteredUsers = users.filter(user => {
+      const term = userSearchTerm.toLowerCase();
+      const matchesName = user.name.toLowerCase().includes(term);
+      const matchesEmail = user.email.toLowerCase().includes(term);
+      const matchesDept = user.department ? getDepartmentFullPath(user.department).toLowerCase().includes(term) : false;
+      return matchesName || matchesEmail || matchesDept;
+  });
 
   const openUserModal = (user?: User) => {
       if (user) {
@@ -297,7 +310,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
           setUserCustomFieldInputs(inputs);
       } else {
           setEditingUser({ 
-            role: ['Member'], // Default role
+            role: 'Member', 
             department: '', 
             phone: '', 
             customFields: [] 
@@ -305,17 +318,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
           setUserCustomFieldInputs({});
       }
       setIsUserModalOpen(true);
-  };
-
-  const toggleRole = (role: UserRole) => {
-      setEditingUser(prev => {
-          const currentRoles = prev.role || [];
-          if (currentRoles.includes(role)) {
-              return { ...prev, role: currentRoles.filter(r => r !== role) };
-          } else {
-              return { ...prev, role: [...currentRoles, role] };
-          }
-      });
   };
 
   const handleSaveUser = (e: React.FormEvent) => {
@@ -333,14 +335,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
             customFields: customFieldsData
         });
     } else {
-        const newId = generateNextUserId();
         onAddUser({
-            id: newId,
+            id: crypto.randomUUID(),
             name: editingUser.name!,
             email: editingUser.email!,
             phone: editingUser.phone || '',
             department: editingUser.department || '',
-            role: editingUser.role && editingUser.role.length > 0 ? editingUser.role : ['Member'],
+            role: editingUser.role || 'Member',
             avatarUrl: `https://picsum.photos/seed/${editingUser.name}/200`,
             customFields: customFieldsData
         });
@@ -525,14 +526,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
       alert('SQL 脚本已复制到剪贴板！');
   };
 
+  const getRoleLabel = (role: string) => {
+      switch(role) {
+          case 'Admin': return '系统管理员';
+          case 'TeamLeader': return '团队负责人';
+          case 'Member': return '成员';
+          default: return role;
+      }
+  };
+
   // Filter custom fields for users
   const userFields = fieldDefinitions.filter(f => f.target === 'User');
-
-  const roleTranslations: Record<UserRole, string> = {
-      'SystemAdmin': '系统管理员',
-      'TeamLeader': '团队长',
-      'Member': '成员'
-  };
 
   return (
     <div className="space-y-6 animate-fade-in relative">
@@ -568,35 +572,43 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {activeTab === 'USERS' && (
         <div className="space-y-4">
-             <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                <p className="text-sm text-gray-500">共计 <span className="font-bold text-blue-600">{users.length}</span> 位成员</p>
+             <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                <div className="flex items-center gap-4 w-full sm:w-auto">
+                    <p className="text-sm text-gray-500 whitespace-nowrap">共 <span className="font-bold text-blue-600">{filteredUsers.length}</span> / {users.length}</p>
+                    <div className="relative flex-1 sm:w-64">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <input 
+                            type="text" 
+                            placeholder="搜索姓名、邮箱或部门..." 
+                            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                            value={userSearchTerm}
+                            onChange={(e) => setUserSearchTerm(e.target.value)}
+                        />
+                    </div>
+                </div>
                 <button 
                     onClick={() => openUserModal()}
-                    className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition-colors"
+                    className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition-colors"
                 >
                     <Plus className="w-5 h-5" />
                     <span>添加成员</span>
                 </button>
             </div>
             <div className="grid grid-cols-1 gap-4">
-                {users.map(user => (
+                {filteredUsers.map(user => (
                 <div key={user.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-6 group">
                     {/* Identity */}
                     <div className="flex items-center space-x-4 min-w-[200px]">
                         <img src={user.avatarUrl} alt={user.name} className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm flex-shrink-0 object-cover" />
                         <div>
                             <h3 className="font-bold text-gray-900 text-lg">{user.name}</h3>
-                            <p className="text-xs text-gray-400 font-mono mt-0.5">{user.id}</p>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                                {user.role.map(role => (
-                                    <span key={role} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                        role === 'SystemAdmin' ? 'bg-purple-100 text-purple-800' : 
-                                        role === 'TeamLeader' ? 'bg-indigo-100 text-indigo-800' : 'bg-blue-100 text-blue-800'
-                                    }`}>
-                                        {roleTranslations[role]}
-                                    </span>
-                                ))}
-                            </div>
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${
+                                user.role === 'Admin' ? 'bg-purple-100 text-purple-800' : 
+                                user.role === 'TeamLeader' ? 'bg-indigo-100 text-indigo-800' : 
+                                'bg-blue-100 text-blue-800'
+                            }`}>
+                                {getRoleLabel(user.role)}
+                            </span>
                         </div>
                     </div>
 
@@ -627,6 +639,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
                 </div>
                 ))}
+                {filteredUsers.length === 0 && (
+                    <div className="text-center py-12 bg-white rounded-xl border border-gray-200 border-dashed text-gray-400">
+                        <div className="flex justify-center mb-2"><Search className="w-8 h-8 text-gray-300" /></div>
+                        <p>未找到匹配的团队成员</p>
+                    </div>
+                )}
             </div>
         </div>
       )}
@@ -659,7 +677,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                     key={root.id}
                                     dept={root}
                                     allDepts={departments}
-                                    depth={0}
                                     onEdit={(d) => openDeptModal(d)}
                                     onDelete={handleDeptDelete}
                                     onAddSub={(pid) => openDeptModal(undefined, pid)}
@@ -786,26 +803,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                     )}
                                 </div>
 
-                                <div className="col-span-1 sm:col-span-2 space-y-2">
-                                    <InputLabel>系统角色 (多选)</InputLabel>
-                                    <div className="flex flex-wrap gap-3">
-                                        <label className={`flex items-center space-x-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${editingUser.role?.includes('SystemAdmin') ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
-                                            <input type="checkbox" className="hidden" checked={editingUser.role?.includes('SystemAdmin')} onChange={() => toggleRole('SystemAdmin')} />
-                                            {editingUser.role?.includes('SystemAdmin') ? <CheckSquare className="w-5 h-5 text-purple-600" /> : <Square className="w-5 h-5 text-gray-400" />}
-                                            <span className={editingUser.role?.includes('SystemAdmin') ? 'text-purple-700 font-medium' : 'text-gray-600'}>系统管理员</span>
-                                        </label>
-                                        <label className={`flex items-center space-x-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${editingUser.role?.includes('TeamLeader') ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-200'}`}>
-                                            <input type="checkbox" className="hidden" checked={editingUser.role?.includes('TeamLeader')} onChange={() => toggleRole('TeamLeader')} />
-                                            {editingUser.role?.includes('TeamLeader') ? <CheckSquare className="w-5 h-5 text-indigo-600" /> : <Square className="w-5 h-5 text-gray-400" />}
-                                            <span className={editingUser.role?.includes('TeamLeader') ? 'text-indigo-700 font-medium' : 'text-gray-600'}>团队长</span>
-                                        </label>
-                                        <label className={`flex items-center space-x-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${editingUser.role?.includes('Member') ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
-                                            <input type="checkbox" className="hidden" checked={editingUser.role?.includes('Member')} onChange={() => toggleRole('Member')} />
-                                            {editingUser.role?.includes('Member') ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5 text-gray-400" />}
-                                            <span className={editingUser.role?.includes('Member') ? 'text-blue-700 font-medium' : 'text-gray-600'}>普通成员</span>
-                                        </label>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-1">成员 ID 将由系统自动生成 (EMP-XXX)</p>
+                                <div className="space-y-1.5">
+                                    <InputLabel>系统角色</InputLabel>
+                                    <select 
+                                        className="w-full border border-gray-300 rounded-lg p-2.5 text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all appearance-none cursor-pointer"
+                                        value={editingUser.role}
+                                        onChange={e => setEditingUser({...editingUser, role: e.target.value as any})}
+                                    >
+                                        <option value="Member">成员 (普通权限)</option>
+                                        <option value="TeamLeader">团队负责人 (团队权限)</option>
+                                        <option value="Admin">系统管理员 (完全权限)</option>
+                                    </select>
                                 </div>
                            </div>
 

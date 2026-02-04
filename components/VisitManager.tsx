@@ -1,18 +1,20 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Visit, Client, CustomFieldDefinition, StorageSettings, Attachment, AIAnalysisResult, CustomFieldData, VisitCategory, AIModelProvider, User } from '../types';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Visit, Client, CustomFieldDefinition, StorageSettings, Attachment, AIAnalysisResult, CustomFieldData, VisitCategory, AIModelProvider, User, Department } from '../types';
 import { analyzeVisitNotes, analyzeVisitAudio } from '../services/geminiService';
 import { startLiveTranscription, stopLiveTranscription, isSpeechRecognitionSupported } from '../services/webSpeechService';
 import { 
   Mic, Square, Play, Pause, Paperclip, X, Loader2, Sparkles, 
   Calendar, User as UserIcon, AlertCircle, Save, Trash2, ChevronLeft, 
-  Clock, FileText, ImageIcon, Headphones, MoreHorizontal, Plus, Briefcase, Settings, Check, Key
+  Clock, FileText, ImageIcon, Headphones, MoreHorizontal, Plus, Briefcase, Settings, Check, Key,
+  Building, Lock, Shield, UserCheck
 } from 'lucide-react';
 
 interface VisitManagerProps {
   clients: Client[];
   visits: Visit[];
   users?: User[]; // Optional for backward compatibility, but needed for displaying names
+  departments?: Department[];
   onAddVisit: (visit: Visit) => void;
   onUpdateVisit: (visit: Visit) => void;
   onDeleteVisit: (id: string) => void;
@@ -26,7 +28,7 @@ interface VisitManagerProps {
 }
 
 const VisitManager: React.FC<VisitManagerProps> = ({
-  clients, visits, users = [], onAddVisit, onUpdateVisit, onDeleteVisit, 
+  clients, visits, users = [], departments = [], onAddVisit, onUpdateVisit, onDeleteVisit, 
   fieldDefinitions, initialEditingVisitId, onClearInitialEditingVisitId,
   currentUserId, storageSettings, onUpdateStorageSettings
 }) => {
@@ -57,6 +59,10 @@ const VisitManager: React.FC<VisitManagerProps> = ({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showAIConfig, setShowAIConfig] = useState(false);
   
+  // AI Config Local State (for Modal)
+  const [tempAIModel, setTempAIModel] = useState<AIModelProvider>('Gemini');
+  const [tempDeepSeekKey, setTempDeepSeekKey] = useState('');
+
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -65,6 +71,24 @@ const VisitManager: React.FC<VisitManagerProps> = ({
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const notesBeforeRecordingRef = useRef<string>('');
   const tempTranscriptRef = useRef<string>('');
+
+  // Permission Logic
+  const currentUserObj = users.find(u => u.id === currentUserId);
+  const editingVisitObj = editingId ? visits.find(v => v.id === editingId) : null;
+  
+  const canEdit = useMemo(() => {
+    // If creating new, allow edit
+    if (!editingId) return true;
+    
+    // If Admin or TeamLeader, allow edit (Team Leader has elevated permissions)
+    if (currentUserObj?.role === 'Admin' || currentUserObj?.role === 'TeamLeader') return true;
+
+    // If Creator (Visit User ID matches Current User ID), allow edit
+    if (editingVisitObj && editingVisitObj.userId === currentUserId) return true;
+
+    // Otherwise, read-only
+    return false;
+  }, [editingId, currentUserObj, editingVisitObj, currentUserId]);
 
   useEffect(() => {
     if (initialEditingVisitId) {
@@ -151,7 +175,51 @@ const VisitManager: React.FC<VisitManagerProps> = ({
     setHasUnsavedChanges(false);
   };
 
+  // Helper for department hierarchy display
+  const getDepartmentPath = (deptIdOrName: string | undefined) => {
+    if (!deptIdOrName) return '';
+    
+    // 1. Try to find by ID
+    let current = departments.find(d => d.id === deptIdOrName);
+    
+    // 2. If not found, handle fallback logic
+    if (!current) {
+        // If it looks like a UUID, hide it (don't show ID to user)
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deptIdOrName || '');
+        if (isUUID) {
+             return '未知部门'; 
+        }
+        // It's likely a legacy name string (e.g. "Sales"), try to find object for hierarchy, else return string
+        current = departments.find(d => d.name === deptIdOrName);
+        if (!current) return deptIdOrName || '';
+    }
+
+    const path = [current.name];
+    let parentId = current.parentId;
+    let depth = 0;
+
+    // Traverse up to 2 parent levels
+    while (parentId && depth < 2) {
+        const parent = departments.find(d => d.id === parentId);
+        if (parent) {
+            path.unshift(parent.name);
+            parentId = parent.parentId;
+            depth++;
+        } else {
+            break;
+        }
+    }
+    return path.join(' / ');
+  };
+
+  const getUserName = (id: string | undefined) => {
+      if (!id) return '未知';
+      const u = users.find(user => user.id === id);
+      return u ? u.name : '未知';
+  };
+
   const startRecording = async () => {
+    if (!canEdit) return;
     if (!isSpeechRecognitionSupported()) {
       alert("您的浏览器不支持语音识别，请使用 Chrome 或 Edge 浏览器。");
       return;
@@ -226,6 +294,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       const reader = new FileReader();
@@ -273,6 +342,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
   };
 
   const handleAIAnalysis = async () => {
+    if (!canEdit) return;
     if (!selectedClientId) {
         alert("请先选择客户");
         return;
@@ -331,6 +401,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
   };
 
   const handleSave = () => {
+    if (!canEdit) return;
     if (!selectedClientId) {
       alert("必须选择客户");
       return;
@@ -344,7 +415,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
       id: editingId || crypto.randomUUID(),
       clientId: client.id,
       clientName: client.name,
-      userId: currentUserId,
+      userId: editingId && editingVisitObj ? editingVisitObj.userId : currentUserId, // Preserve original creator or use current if new
       date: new Date(date).toISOString(),
       category,
       summary: summary || '暂无摘要',
@@ -366,24 +437,22 @@ const VisitManager: React.FC<VisitManagerProps> = ({
     setView('LIST');
   };
 
-  const handleUpdateModel = (model: AIModelProvider) => {
-    onUpdateStorageSettings({
-        ...storageSettings,
-        aiConfig: {
-            ...storageSettings.aiConfig,
-            activeModel: model
-        }
-    });
+  const handleOpenAIConfig = () => {
+    setTempAIModel(storageSettings.aiConfig.activeModel);
+    setTempDeepSeekKey(storageSettings.aiConfig.deepSeekApiKey || '');
+    setShowAIConfig(true);
   };
 
-  const handleUpdateDeepSeekKey = (key: string) => {
+  const handleSaveAIConfig = () => {
     onUpdateStorageSettings({
         ...storageSettings,
         aiConfig: {
             ...storageSettings.aiConfig,
-            deepSeekApiKey: key
+            activeModel: tempAIModel,
+            deepSeekApiKey: tempDeepSeekKey
         }
     });
+    setShowAIConfig(false);
   };
 
   const visitDefinitions = fieldDefinitions.filter(d => d.target === 'Visit');
@@ -422,6 +491,8 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                   {filteredVisits.map(visit => {
                       const visitor = users.find(u => u.id === visit.userId);
                       const client = clients.find(c => c.id === visit.clientId);
+                      const visitorDept = visitor ? getDepartmentPath(visitor.department) : '';
+
                       return (
                           <div key={visit.id} onClick={() => handleEditVisit(visit.id)} className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group">
                               <div className="flex justify-between items-start mb-2">
@@ -437,9 +508,10 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                                                 : visit.date
                                               }
                                           </span>
-                                          <span className="flex items-center text-gray-700 font-medium bg-gray-100 px-1.5 py-0.5 rounded">
-                                              <UserIcon className="w-3 h-3 mr-1" /> 
-                                              {visitor ? visitor.name : '未知用户'}
+                                          <span className="flex items-center text-gray-700 font-medium bg-gray-100 px-2 py-1 rounded max-w-[250px] truncate" title={visitorDept ? `${visitor?.name} - ${visitorDept}` : visitor?.name}>
+                                              <UserIcon className="w-3 h-3 mr-1 flex-shrink-0" /> 
+                                              <span className="truncate">{visitor ? visitor.name : '未知用户'}</span>
+                                              {visitorDept && <span className="text-gray-400 ml-1 font-normal truncate max-w-[150px]"> - {visitorDept}</span>}
                                           </span>
                                           <span className={`px-1.5 py-0.5 rounded font-bold ${visit.category === 'Inbound' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{visit.category === 'Inbound' ? '来访' : '外出'}</span>
                                       </div>
@@ -466,7 +538,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
       );
   }
 
-  // EDIT VIEW (unchanged mainly)
+  // EDIT VIEW
   return (
       <div className="h-full flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden relative">
           <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
@@ -474,16 +546,21 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                   <button onClick={() => setView('LIST')} className="p-2 hover:bg-white rounded-full transition-colors text-gray-500">
                       <ChevronLeft className="w-5 h-5" />
                   </button>
-                  <h2 className="text-xl font-bold text-gray-900">{editingId ? '编辑拜访记录' : '新拜访记录'}</h2>
+                  <div className="flex items-center space-x-2">
+                     <h2 className="text-xl font-bold text-gray-900">{editingId ? '编辑拜访记录' : '新拜访记录'}</h2>
+                     {!canEdit && <span className="flex items-center text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium"><Lock className="w-3 h-3 mr-1"/> 只读模式</span>}
+                  </div>
               </div>
               <div className="flex items-center space-x-3">
-                   {hasUnsavedChanges && <span className="text-xs text-orange-500 font-medium animate-pulse">未保存</span>}
-                   {editingId && (
+                   {hasUnsavedChanges && canEdit && <span className="text-xs text-orange-500 font-medium animate-pulse">未保存</span>}
+                   {editingId && canEdit && (
                       <button onClick={() => { if(confirm('确定删除?')) { onDeleteVisit(editingId); setView('LIST'); } }} className="text-red-600 hover:bg-red-50 p-2 rounded-lg"><Trash2 className="w-5 h-5" /></button>
                    )}
-                   <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold shadow-sm transition-all flex items-center">
-                       <Save className="w-4 h-4 mr-2" /> 保存
-                   </button>
+                   {canEdit && (
+                       <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold shadow-sm transition-all flex items-center">
+                           <Save className="w-4 h-4 mr-2" /> 保存
+                       </button>
+                   )}
               </div>
           </div>
 
@@ -493,19 +570,64 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                   <div className="space-y-6">
                       <div className="space-y-4">
                           <label className="block text-sm font-bold text-gray-700 uppercase tracking-wide">基础信息</label>
+                          
+                          {/* Visitor Info Display (For existing visits) */}
+                          {editingId && (
+                              <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100">
+                                  <label className="text-xs font-semibold text-indigo-500 mb-1 block flex items-center">
+                                      <UserIcon className="w-3 h-3 mr-1" /> 拜访人
+                                  </label>
+                                  {(() => {
+                                      const visit = visits.find(v => v.id === editingId);
+                                      const visitor = users.find(u => u.id === visit?.userId);
+                                      const deptPath = visitor ? getDepartmentPath(visitor.department) : '';
+                                      return (
+                                          <div className="flex flex-col">
+                                              <span className="font-bold text-indigo-900 text-sm">{visitor ? visitor.name : '未知用户'}</span>
+                                              {deptPath && (
+                                                  <span className="text-xs text-indigo-700 flex items-center mt-0.5">
+                                                      <Building className="w-3 h-3 mr-1" />
+                                                      {deptPath}
+                                                  </span>
+                                              )}
+                                          </div>
+                                      );
+                                  })()}
+                              </div>
+                          )}
+
                           <div>
                               <label className="text-xs font-semibold text-gray-500 mb-1 block">客户</label>
                               <select 
-                                  className="w-full border border-gray-300 rounded-lg p-3 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                  className="w-full border border-gray-300 rounded-lg p-3 bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500"
                                   value={selectedClientId}
                                   onChange={e => setSelectedClientId(e.target.value)}
+                                  disabled={!canEdit}
                               >
                                   <option value="">选择客户...</option>
-                                  {clients.map(c => <option key={c.id} value={c.id}>{c.name} - {c.company}</option>)}
+                                  {clients.map(c => (
+                                      <option key={c.id} value={c.id}>
+                                          {c.name} - {c.company} (负责人: {getUserName(c.userId)})
+                                      </option>
+                                  ))}
                               </select>
-                              {selectedClientId && clientPosition && (
-                                  <div className="mt-2 text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg inline-block border border-blue-100">
-                                      <span className="font-bold">当前职位:</span> {clientPosition}
+                              
+                              {/* Client Details Display */}
+                              {selectedClientId && (
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                      {clientPosition && (
+                                          <div className="text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg inline-block border border-blue-100">
+                                              <span className="font-bold">当前职位:</span> {clientPosition}
+                                          </div>
+                                      )}
+                                      <div className="text-xs text-purple-600 bg-purple-50 px-3 py-2 rounded-lg inline-block border border-purple-100 flex items-center">
+                                          <UserCheck className="w-3 h-3 mr-1" />
+                                          <span className="font-bold mr-1">负责人:</span> 
+                                          {(() => {
+                                              const client = clients.find(c => c.id === selectedClientId);
+                                              return getUserName(client?.userId);
+                                          })()}
+                                      </div>
                                   </div>
                               )}
                           </div>
@@ -513,11 +635,11 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                           <div className="grid grid-cols-2 gap-4">
                               <div>
                                   <label className="text-xs font-semibold text-gray-500 mb-1 block">日期</label>
-                                  <input type="date" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={date} onChange={e => setDate(e.target.value)} />
+                                  <input type="date" disabled={!canEdit} className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500" value={date} onChange={e => setDate(e.target.value)} />
                               </div>
                               <div>
                                   <label className="text-xs font-semibold text-gray-500 mb-1 block">类型</label>
-                                  <select className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={category} onChange={e => setCategory(e.target.value as VisitCategory)}>
+                                  <select disabled={!canEdit} className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500" value={category} onChange={e => setCategory(e.target.value as VisitCategory)}>
                                       <option value="Outbound">外出拜访</option>
                                       <option value="Inbound">客户来访</option>
                                   </select>
@@ -526,7 +648,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
 
                           <div>
                               <label className="text-xs font-semibold text-gray-500 mb-1 block">参与人员</label>
-                              <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="如：张经理, 李工" value={participants} onChange={e => setParticipants(e.target.value)} />
+                              <input type="text" disabled={!canEdit} className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500" placeholder="如：张经理, 李工" value={participants} onChange={e => setParticipants(e.target.value)} />
                           </div>
                       </div>
 
@@ -539,7 +661,8 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                                       <label className="text-xs font-semibold text-gray-500 mb-1 block">{def.label}</label>
                                       <input 
                                           type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
-                                          className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                          disabled={!canEdit}
+                                          className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500"
                                           placeholder={`输入${def.label}...`}
                                           value={customFieldsValues[def.id] || ''}
                                           onChange={e => setCustomFieldsValues({...customFieldsValues, [def.id]: e.target.value})}
@@ -576,50 +699,58 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                                                    <span className="w-0.5 bg-indigo-500 animate-[bounce_0.8s_infinite] h-1.5"></span>
                                                 </span>
                                            )}
-                                           <button onClick={() => setExistingAttachments(prev => prev.filter(a => a.id !== att.id))} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-1"><X className="w-3 h-3" /></button>
+                                           {canEdit && (
+                                                <button onClick={() => setExistingAttachments(prev => prev.filter(a => a.id !== att.id))} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-1"><X className="w-3 h-3" /></button>
+                                           )}
                                        </div>
                                    );
                                })}
                            </div>
-                           <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-                           <button onClick={() => fileInputRef.current?.click()} className="w-full border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-500 hover:text-blue-600 rounded-lg p-3 text-sm font-medium transition-all flex items-center justify-center">
-                               <Paperclip className="w-4 h-4 mr-2" /> 上传图片/文档
-                           </button>
+                           {canEdit && (
+                               <>
+                                   <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                                   <button onClick={() => fileInputRef.current?.click()} className="w-full border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-500 hover:text-blue-600 rounded-lg p-3 text-sm font-medium transition-all flex items-center justify-center">
+                                       <Paperclip className="w-4 h-4 mr-2" /> 上传图片/文档
+                                   </button>
+                               </>
+                           )}
                        </div>
                   </div>
 
                   {/* Middle & Right: Notes & AI */}
                   <div className="lg:col-span-2 flex flex-col h-[800px]">
-                      {/* Toolbar */}
-                      <div className="flex items-center justify-between mb-4 bg-gray-50 p-3 rounded-xl border border-gray-200">
-                           <div className="flex items-center space-x-2">
-                               <button 
-                                  onClick={isRecording ? stopRecording : startRecording}
-                                  className={`flex items-center px-4 py-2 rounded-lg font-bold transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
-                               >
-                                   {isRecording ? <Square className="w-4 h-4 mr-2 fill-current" /> : <Mic className="w-4 h-4 mr-2" />}
-                                   {isRecording ? '停止录音' : '语音录入'}
-                               </button>
-                               <span className="text-xs text-gray-400 hidden sm:inline-block">支持实时转写</span>
-                           </div>
-                           <div className="flex items-center space-x-2">
-                               <button 
-                                   onClick={() => setShowAIConfig(true)}
-                                   className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg transition-colors"
-                                   title="AI 模型设置"
-                               >
-                                   <Settings className="w-5 h-5" />
-                               </button>
-                               <button 
-                                  onClick={handleAIAnalysis}
-                                  disabled={isAnalyzing || !rawNotes}
-                                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-bold shadow-md shadow-indigo-100 flex items-center transition-all"
-                               >
-                                   {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                                   {isAnalyzing ? '分析中...' : 'AI 智能分析'}
-                               </button>
-                           </div>
-                      </div>
+                      {/* Toolbar - Only visible if can edit */}
+                      {canEdit && (
+                          <div className="flex items-center justify-between mb-4 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                               <div className="flex items-center space-x-2">
+                                   <button 
+                                      onClick={isRecording ? stopRecording : startRecording}
+                                      className={`flex items-center px-4 py-2 rounded-lg font-bold transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
+                                   >
+                                       {isRecording ? <Square className="w-4 h-4 mr-2 fill-current" /> : <Mic className="w-4 h-4 mr-2" />}
+                                       {isRecording ? '停止录音' : '语音录入'}
+                                   </button>
+                                   <span className="text-xs text-gray-400 hidden sm:inline-block">支持实时转写</span>
+                               </div>
+                               <div className="flex items-center space-x-2">
+                                   <button 
+                                       onClick={handleOpenAIConfig}
+                                       className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg transition-colors"
+                                       title="AI 模型设置"
+                                   >
+                                       <Settings className="w-5 h-5" />
+                                   </button>
+                                   <button 
+                                      onClick={handleAIAnalysis}
+                                      disabled={isAnalyzing || !rawNotes}
+                                      className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-bold shadow-md shadow-indigo-100 flex items-center transition-all"
+                                   >
+                                       {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                                       {isAnalyzing ? '分析中...' : 'AI 智能分析'}
+                                   </button>
+                               </div>
+                          </div>
+                      )}
 
                       {transcriptionError && (
                           <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center">
@@ -636,8 +767,9 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                                   <span className="text-xs font-normal text-gray-400">{rawNotes.length} 字</span>
                               </label>
                               <textarea 
-                                  className="flex-1 w-full border border-gray-300 rounded-xl p-4 text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none resize-none leading-relaxed text-sm bg-white"
-                                  placeholder="在此输入会议纪要，或使用语音录入..."
+                                  className="flex-1 w-full border border-gray-300 rounded-xl p-4 text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none resize-none leading-relaxed text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500"
+                                  placeholder={canEdit ? "在此输入会议纪要，或使用语音录入..." : "暂无笔记内容"}
+                                  disabled={!canEdit}
                                   value={rawNotes}
                                   onChange={e => { setRawNotes(e.target.value); setHasUnsavedChanges(true); }}
                               />
@@ -681,7 +813,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                                            <ul className="space-y-2">
                                                {actionItems.map((item, i) => (
                                                    <li key={i} className="flex items-start text-sm text-gray-700">
-                                                       <input type="checkbox" className="mt-1 mr-2 rounded text-indigo-600 focus:ring-indigo-500" />
+                                                       <input type="checkbox" disabled={!canEdit} className="mt-1 mr-2 rounded text-indigo-600 focus:ring-indigo-500" />
                                                        <span className="flex-1">{item}</span>
                                                    </li>
                                                ))}
@@ -707,6 +839,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
                                            value={followUpEmailDraft}
                                            onChange={e => setFollowUpEmailDraft(e.target.value)}
                                            placeholder="AI 将在此生成邮件草稿..."
+                                           readOnly={!canEdit}
                                        />
                                    </div>
                                </div>
@@ -718,60 +851,66 @@ const VisitManager: React.FC<VisitManagerProps> = ({
 
           {/* AI Settings Modal */}
           {showAIConfig && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
-                <div className="bg-gray-900 px-6 py-4 flex justify-between items-center border-b border-gray-800">
-                    <h3 className="text-lg font-bold text-white flex items-center">
-                        <Settings className="w-5 h-5 mr-2 text-blue-400" />
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 transition-all">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in ring-1 ring-gray-200">
+                <div className="bg-gray-50 px-6 py-4 flex justify-between items-center border-b border-gray-100">
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center">
+                        <Settings className="w-5 h-5 mr-2 text-blue-600" />
                         AI 模型配置
                     </h3>
-                    <button onClick={() => setShowAIConfig(false)} className="text-gray-400 hover:text-white transition-colors hover:bg-gray-800 p-1 rounded-lg">
-                        <X className="w-6 h-6" />
+                    <button onClick={() => setShowAIConfig(false)} className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded-full hover:bg-gray-200">
+                        <X className="w-5 h-5" />
                     </button>
                 </div>
                 <div className="p-6 space-y-6">
                     <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-3">选择分析模型</label>
+                        <label className="block text-sm font-bold text-gray-700 mb-3">选择分析模型</label>
                         <div className="grid grid-cols-2 gap-4">
                             <button 
-                                onClick={() => handleUpdateModel('Gemini')}
-                                className={`relative p-4 rounded-xl border-2 transition-all text-left ${storageSettings.aiConfig.activeModel === 'Gemini' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+                                onClick={() => setTempAIModel('Gemini')}
+                                className={`relative p-4 rounded-xl border-2 transition-all text-left flex flex-col gap-1 ${tempAIModel === 'Gemini' ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
                             >
-                                <div className="font-bold text-gray-900 mb-1">Gemini</div>
-                                <div className="text-xs text-gray-500">Google GenAI (推荐)</div>
-                                {storageSettings.aiConfig.activeModel === 'Gemini' && <div className="absolute top-3 right-3 text-blue-600"><Check className="w-4 h-4" /></div>}
+                                <span className="font-bold text-gray-900 text-base">Gemini</span>
+                                <span className="text-xs text-gray-500">Google GenAI (多模态)</span>
+                                {tempAIModel === 'Gemini' && <div className="absolute top-3 right-3 text-blue-600"><Check className="w-5 h-5" /></div>}
                             </button>
                             <button 
-                                onClick={() => handleUpdateModel('DeepSeek')}
-                                className={`relative p-4 rounded-xl border-2 transition-all text-left ${storageSettings.aiConfig.activeModel === 'DeepSeek' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+                                onClick={() => setTempAIModel('DeepSeek')}
+                                className={`relative p-4 rounded-xl border-2 transition-all text-left flex flex-col gap-1 ${tempAIModel === 'DeepSeek' ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
                             >
-                                <div className="font-bold text-gray-900 mb-1">DeepSeek</div>
-                                <div className="text-xs text-gray-500">DeepSeek V3/R1</div>
-                                {storageSettings.aiConfig.activeModel === 'DeepSeek' && <div className="absolute top-3 right-3 text-blue-600"><Check className="w-4 h-4" /></div>}
+                                <span className="font-bold text-gray-900 text-base">DeepSeek</span>
+                                <span className="text-xs text-gray-500">DeepSeek V3/R1 (文本)</span>
+                                {tempAIModel === 'DeepSeek' && <div className="absolute top-3 right-3 text-blue-600"><Check className="w-5 h-5" /></div>}
                             </button>
                         </div>
                     </div>
 
-                    {storageSettings.aiConfig.activeModel === 'DeepSeek' && (
-                        <div className="animate-fade-in">
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">DeepSeek API Key</label>
+                    {tempAIModel === 'DeepSeek' && (
+                        <div className="animate-fade-in bg-gray-50 p-4 rounded-xl border border-gray-100">
+                            <label className="block text-sm font-bold text-gray-700 mb-2">DeepSeek API Key</label>
                             <div className="relative">
                                 <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                 <input 
                                     type="password"
-                                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm bg-white"
                                     placeholder="sk-..."
-                                    value={storageSettings.aiConfig.deepSeekApiKey || ''}
-                                    onChange={(e) => handleUpdateDeepSeekKey(e.target.value)}
+                                    value={tempDeepSeekKey}
+                                    onChange={(e) => setTempDeepSeekKey(e.target.value)}
                                 />
                             </div>
-                            <p className="text-xs text-gray-500 mt-2">API Key 仅保存在您的本地浏览器中，不会上传至任何第三方服务器。</p>
+                            <p className="text-xs text-gray-500 mt-2 flex items-center">
+                                <Shield className="w-3 h-3 mr-1" />
+                                Key 仅保存在本地浏览器，不上传服务器。
+                            </p>
                         </div>
                     )}
                 </div>
-                <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
-                    <button onClick={() => setShowAIConfig(false)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg transition-colors">
-                        完成配置
+                <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+                    <button onClick={() => setShowAIConfig(false)} className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium text-sm transition-colors">
+                        取消
+                    </button>
+                    <button onClick={handleSaveAIConfig} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors shadow-sm text-sm">
+                        保存配置
                     </button>
                 </div>
               </div>

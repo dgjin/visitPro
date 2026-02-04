@@ -4,15 +4,13 @@ export interface CustomFieldData {
   value: string;
 }
 
-export type UserRole = 'SystemAdmin' | 'TeamLeader' | 'Member';
-
 export interface User {
   id: string;
   name: string;
   email: string;
   phone: string;
   department: string;
-  role: UserRole[]; // Changed from single string to array
+  role: 'Admin' | 'TeamLeader' | 'Member'; // Updated roles
   avatarUrl: string;
   customFields?: CustomFieldData[];
 }
@@ -35,6 +33,7 @@ export interface CustomFieldDefinition {
 
 export interface Client {
   id: string;
+  userId: string; // Added: Owner/Creator ID
   name: string;
   company: string;
   email: string;

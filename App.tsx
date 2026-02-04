@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Menu, X, Sparkles, Shield, User as UserIcon } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Menu, X, Sparkles, Shield, User as UserIcon, Check } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import ClientManager from './components/ClientManager';
 import VisitManager from './components/VisitManager';
 import AdminPanel from './components/AdminPanel';
-import { Client, Visit, ViewState, User, CustomFieldDefinition, StorageSettings, Department, UserRole } from './types';
+import { Client, Visit, ViewState, User, CustomFieldDefinition, StorageSettings, Department } from './types';
 import { initSupabase, fetchAllData, addClient, updateClient, deleteClient, addVisit, updateVisit, deleteVisit, addUser, updateUser, deleteUser, addField, deleteField, addDepartment, updateDepartment, deleteDepartment } from './services/supabaseService';
 
 const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
@@ -18,18 +18,19 @@ const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
 ];
 
 const MOCK_USERS: User[] = [
-  { id: 'EMP-001', name: 'John Doe', email: 'john@example.com', phone: '138-0013-8001', department: '销售部', role: ['SystemAdmin', 'TeamLeader'], avatarUrl: 'https://picsum.photos/seed/u1/200', customFields: [] },
-  { id: 'EMP-002', name: 'Jane Smith', email: 'jane@example.com', phone: '139-1122-3344', department: '市场部', role: ['Member'], avatarUrl: 'https://picsum.photos/seed/u2/200', customFields: [] },
+  { id: 'u1', name: 'John Doe', email: 'john@example.com', phone: '138-0013-8001', department: '销售部', role: 'Admin', avatarUrl: 'https://picsum.photos/seed/u1/200', customFields: [{ fieldId: 'f6', value: 'EMP001' }] },
+  { id: 'u2', name: 'Jane Smith', email: 'jane@example.com', phone: '139-1122-3344', department: '市场部', role: 'Member', avatarUrl: 'https://picsum.photos/seed/u2/200', customFields: [{ fieldId: 'f6', value: 'EMP002' }] },
+  { id: 'u3', name: 'Mike Johnson', email: 'mike@example.com', phone: '137-5555-6666', department: '销售部', role: 'TeamLeader', avatarUrl: 'https://picsum.photos/seed/u3/200', customFields: [{ fieldId: 'f6', value: 'EMP003' }] },
 ];
 
 const MOCK_CLIENTS: Client[] = [
-  { id: '1', name: '艾丽斯·弗里曼', company: '泰克诺瓦 (TechNova)', email: 'alice@technova.com', phone: '555-0123', address: '科技大道 123 号', avatarUrl: 'https://picsum.photos/seed/alice/200', industry: 'SaaS', status: 'Active', customFields: [{ fieldId: 'f1', value: 'CTO' }, { fieldId: 'f2', value: '英语' }] },
-  { id: '2', name: '鲍勃·史密斯', company: '必筑公司 (BuildCo)', email: 'bob@buildco.com', phone: '555-0199', address: '建设路 456 号', avatarUrl: 'https://picsum.photos/seed/bob/200', industry: 'Construction', status: 'Lead', customFields: [{ fieldId: 'f3', value: '50万-100万' }] },
+  { id: '1', userId: 'u1', name: '艾丽斯·弗里曼', company: '泰克诺瓦 (TechNova)', email: 'alice@technova.com', phone: '555-0123', address: '科技大道 123 号', avatarUrl: 'https://picsum.photos/seed/alice/200', industry: 'SaaS', status: 'Active', customFields: [{ fieldId: 'f1', value: 'CTO' }, { fieldId: 'f2', value: '英语' }] },
+  { id: '2', userId: 'u2', name: '鲍勃·史密斯', company: '必筑公司 (BuildCo)', email: 'bob@buildco.com', phone: '555-0199', address: '建设路 456 号', avatarUrl: 'https://picsum.photos/seed/bob/200', industry: 'Construction', status: 'Lead', customFields: [{ fieldId: 'f3', value: '50万-100万' }] },
 ];
 
 const MOCK_VISITS: Visit[] = [
-  { id: '101', userId: 'EMP-001', clientId: '1', clientName: '艾丽斯·弗里曼', date: new Date(Date.now() - 86400000 * 2).toISOString(), category: 'Outbound', summary: '讨论了第三季度的路线图。客户对目前的进展感到满意，但要求增加一项新的报告功能。', rawNotes: '讨论Q3路线图。客户想要新报表功能。整体满意。', participants: 'CTO Alice, Sales John', outcome: 'Positive', actionItems: ['发送 API 文档', '安排技术评审'], sentimentScore: 85, customFields: [{ fieldId: 'f4', value: '60' }, { fieldId: 'f5', value: '3' }], followUpEmailDraft: 'Subject: Q3 Roadmap...' },
-  { id: '102', userId: 'EMP-002', clientId: '2', clientName: '鲍勃·史密斯', date: new Date(Date.now() - 86400000 * 5).toISOString(), category: 'Inbound', summary: '初步需求会议。客户预算低于预期。需要调整提案。', rawNotes: '预算太低。需调整。', participants: 'Bob Smith, Jane Smith', outcome: 'Neutral', actionItems: ['修改报价', '邮件跟进'], sentimentScore: 50, followUpEmailDraft: 'Subject: Revised Proposal...' },
+  { id: '101', userId: 'u1', clientId: '1', clientName: '艾丽斯·弗里曼', date: new Date(Date.now() - 86400000 * 2).toISOString(), category: 'Outbound', summary: '讨论了第三季度的路线图。客户对目前的进展感到满意，但要求增加一项新的报告功能。', rawNotes: '讨论Q3路线图。客户想要新报表功能。整体满意。', participants: 'CTO Alice, Sales John', outcome: 'Positive', actionItems: ['发送 API 文档', '安排技术评审'], sentimentScore: 85, customFields: [{ fieldId: 'f4', value: '60' }, { fieldId: 'f5', value: '3' }], followUpEmailDraft: 'Subject: Q3 Roadmap...' },
+  { id: '102', userId: 'u2', clientId: '2', clientName: '鲍勃·史密斯', date: new Date(Date.now() - 86400000 * 5).toISOString(), category: 'Inbound', summary: '初步需求会议。客户预算低于预期。需要调整提案。', rawNotes: '预算太低。需调整。', participants: 'Bob Smith, Jane Smith', outcome: 'Neutral', actionItems: ['修改报价', '邮件跟进'], sentimentScore: 50, followUpEmailDraft: 'Subject: Revised Proposal...' },
 ];
 
 const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
@@ -49,7 +50,10 @@ const App: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Migration logic
+        
+        // --- Migration Logic ---
+        
+        // 1. Config migrations
         if (!parsed.storageSettings.supabaseConfig) {
             parsed.storageSettings.supabaseConfig = DEFAULT_STORAGE_SETTINGS.supabaseConfig;
         }
@@ -59,8 +63,26 @@ const App: React.FC = () => {
         if (!parsed.storageSettings.iflytekConfig) {
             parsed.storageSettings.iflytekConfig = DEFAULT_STORAGE_SETTINGS.iflytekConfig;
         }
-        // Force Supabase mode
-        parsed.storageSettings.mode = 'SUPABASE';
+        // Force Supabase mode default
+        if (!parsed.storageSettings.mode) parsed.storageSettings.mode = 'SUPABASE';
+
+        // 2. Data migrations (Backfill missing userId)
+        const defaultUserId = (parsed.users && parsed.users.length > 0) ? parsed.users[0].id : 'u1';
+        
+        if (parsed.clients) {
+            parsed.clients = parsed.clients.map((c: any) => ({
+                ...c,
+                userId: c.userId || defaultUserId
+            }));
+        }
+        
+        if (parsed.visits) {
+            parsed.visits = parsed.visits.map((v: any) => ({
+                ...v,
+                userId: v.userId || defaultUserId
+            }));
+        }
+
         return parsed;
       } catch (e) {
         console.error("Failed to parse local storage", e);
@@ -79,8 +101,17 @@ const App: React.FC = () => {
   const [fieldDefinitions, setFieldDefinitions] = useState<CustomFieldDefinition[]>(initialState?.fieldDefinitions || MOCK_FIELD_DEFINITIONS);
   const [departments, setDepartments] = useState<Department[]>(initialState?.departments || []);
   const [storageSettings, setStorageSettings] = useState<StorageSettings>(initialState?.storageSettings || DEFAULT_STORAGE_SETTINGS);
-  const [currentUser, setCurrentUser] = useState<User>(users[0]);
+  
+  // Safe initialization of currentUser
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+      if (users.length > 0) return users[0];
+      return MOCK_USERS[0]; 
+  });
+  
   const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
+  
+  // User Switcher Modal State
+  const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
 
   // Initialize Supabase on load or setting change
   useEffect(() => {
@@ -131,9 +162,14 @@ const App: React.FC = () => {
           try {
               const data = JSON.parse(e.target?.result as string);
               if (data.users && data.clients && data.visits) {
+                  // Ensure migrated structure on restore as well
+                  const defaultUId = data.users[0]?.id || 'u1';
+                  const migratedClients = data.clients.map((c: any) => ({...c, userId: c.userId || defaultUId}));
+                  const migratedVisits = data.visits.map((v: any) => ({...v, userId: v.userId || defaultUId}));
+
                   setUsers(data.users);
-                  setClients(data.clients);
-                  setVisits(data.visits);
+                  setClients(migratedClients);
+                  setVisits(migratedVisits);
                   setFieldDefinitions(data.fieldDefinitions || MOCK_FIELD_DEFINITIONS);
                   setDepartments(data.departments || []);
                   setStorageSettings(data.storageSettings || DEFAULT_STORAGE_SETTINGS);
@@ -248,13 +284,13 @@ const App: React.FC = () => {
           });
       }
   };
-  const handleUpdateUserRole = async (id: string, roles: UserRole[]) => { 
+  const handleUpdateUserRole = async (id: string, role: 'Admin' | 'TeamLeader' | 'Member') => { 
       const updated = users.find(u => u.id === id);
       if (updated) {
-          const newUser = { ...updated, role: roles };
+          const newUser = { ...updated, role };
           setUsers(prev => prev.map(u => u.id === id ? newUser : u));
           if (currentUser.id === id) setCurrentUser(newUser);
-          await safeExecute(updateUser(newUser)); 
+          await safeExecute(updateUser(newUser)); // No rollback needed strictly for role change unless critical
       }
   };
 
@@ -302,6 +338,12 @@ const App: React.FC = () => {
     </button>
   );
 
+  const getRoleLabel = (role: string) => {
+      if (role === 'Admin') return '系统管理员';
+      if (role === 'TeamLeader') return '团队负责人';
+      return '成员';
+  };
+
   return (
       <div className="flex h-screen bg-gray-50 overflow-hidden">
         <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 text-white transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -314,32 +356,36 @@ const App: React.FC = () => {
               <NavItem viewTarget={ViewState.DASHBOARD} label="仪表盘" icon={LayoutDashboard} />
               <NavItem viewTarget={ViewState.CLIENTS} label="客户列表" icon={Users} />
               <NavItem viewTarget={ViewState.VISITS} label="拜访管理" icon={CalendarCheck} />
-              {currentUser.role.includes('SystemAdmin') && (
+              {currentUser.role === 'Admin' && (
                  <div className="pt-4 mt-4 border-t border-gray-800">
                     <p className="px-4 text-xs font-semibold text-gray-500 uppercase mb-2">管理员</p>
                     <NavItem viewTarget={ViewState.ADMIN} label="系统管理" icon={Shield} />
                  </div>
               )}
             </nav>
+            
+            {/* User Profile / Switcher Trigger */}
             <div className="p-4 border-t border-gray-800 mt-auto">
                <button className="w-full flex items-center space-x-3 px-4 py-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"><Settings className="w-5 h-5" /><span>设置</span></button>
-               <div className="mt-4 flex items-center space-x-3 px-4 relative group cursor-pointer">
+               
+               <div 
+                  className="mt-4 flex items-center space-x-3 px-4 py-2 cursor-pointer hover:bg-gray-800 rounded-lg transition-colors active:scale-95"
+                  onClick={() => setIsUserSwitchModalOpen(true)}
+                  title="点击切换用户"
+               >
                   <img src={currentUser.avatarUrl} alt="Profile" className="w-8 h-8 rounded-full bg-gray-700" />
-                  <div className="text-sm">
-                    <p className="text-white font-medium">{currentUser.name}</p>
-                    <p className="text-gray-500 text-xs">
-                        {currentUser.role.includes('SystemAdmin') ? '系统管理员' : currentUser.role.includes('TeamLeader') ? '团队长' : '成员'}
-                    </p>
+                  <div className="text-sm flex-1 min-w-0">
+                    <p className="text-white font-medium truncate">{currentUser.name}</p>
+                    <p className="text-gray-500 text-xs truncate">{getRoleLabel(currentUser.role)}</p>
                   </div>
-                  <div className="absolute bottom-full left-0 w-full mb-2 bg-white rounded-lg shadow-lg p-2 hidden group-hover:block text-gray-800 z-50">
-                      <p className="text-xs text-gray-500 mb-1 px-2">切换用户 (Demo)</p>
-                      {users.map(u => (<button key={u.id} onClick={() => setCurrentUser(u)} className={`w-full text-left px-2 py-1 text-sm rounded hover:bg-gray-100 ${currentUser.id === u.id ? 'font-bold text-blue-600' : ''}`}>{u.name} ({u.role.join(', ')})</button>))}
-                  </div>
+                  <Settings className="w-4 h-4 text-gray-500" />
                </div>
             </div>
           </div>
         </aside>
+        
         {isMobileMenuOpen && <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />}
+        
         <div className="flex-1 flex flex-col h-full overflow-hidden">
           <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-6 lg:px-8">
             <div className="flex items-center lg:hidden"><button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-500 hover:text-gray-700"><Menu className="w-6 h-6" /></button></div>
@@ -348,12 +394,59 @@ const App: React.FC = () => {
           <main className="flex-1 overflow-y-auto p-4 lg:p-8">
             <div className="max-w-7xl mx-auto h-full">
               {view === ViewState.DASHBOARD && <Dashboard visits={visits} users={users} departments={departments} clients={clients} totalClients={clients.length} onVisitClick={handleVisitClick} />}
-              {view === ViewState.CLIENTS && <ClientManager clients={clients} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} fieldDefinitions={fieldDefinitions} />}
-              {view === ViewState.VISITS && <VisitManager clients={clients} visits={visits} users={users} onAddVisit={handleAddVisit} onUpdateVisit={handleUpdateVisit} onDeleteVisit={handleDeleteVisit} onUpdateClient={handleUpdateClient} fieldDefinitions={fieldDefinitions} initialEditingVisitId={selectedVisitId} onClearInitialEditingVisitId={() => setSelectedVisitId(null)} currentUserId={currentUser.id} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} />}
-              {view === ViewState.ADMIN && currentUser.role.includes('SystemAdmin') && <AdminPanel users={users} clients={clients} visits={visits} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateUserRole={handleUpdateUserRole} fieldDefinitions={fieldDefinitions} onAddField={handleAddField} onDeleteField={handleDeleteField} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} onBackupData={handleBackupData} onRestoreData={handleRestoreData} onSyncSupabase={handleSyncSupabase} departments={departments} onAddDepartment={handleAddDepartment} onUpdateDepartment={handleUpdateDepartment} onDeleteDepartment={handleDeleteDepartment} />}
+              {view === ViewState.CLIENTS && <ClientManager clients={clients} users={users} currentUser={currentUser} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} fieldDefinitions={fieldDefinitions} />}
+              {view === ViewState.VISITS && <VisitManager clients={clients} visits={visits} users={users} departments={departments} onAddVisit={handleAddVisit} onUpdateVisit={handleUpdateVisit} onDeleteVisit={handleDeleteVisit} onUpdateClient={handleUpdateClient} fieldDefinitions={fieldDefinitions} initialEditingVisitId={selectedVisitId} onClearInitialEditingVisitId={() => setSelectedVisitId(null)} currentUserId={currentUser.id} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} />}
+              {view === ViewState.ADMIN && currentUser.role === 'Admin' && <AdminPanel users={users} clients={clients} visits={visits} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateUserRole={handleUpdateUserRole} fieldDefinitions={fieldDefinitions} onAddField={handleAddField} onDeleteField={handleDeleteField} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} onBackupData={handleBackupData} onRestoreData={handleRestoreData} onSyncSupabase={handleSyncSupabase} departments={departments} onAddDepartment={handleAddDepartment} onUpdateDepartment={handleUpdateDepartment} onDeleteDepartment={handleDeleteDepartment} />}
             </div>
           </main>
         </div>
+
+        {/* User Switcher Modal */}
+        {isUserSwitchModalOpen && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-scale-in">
+                    <div className="bg-gray-900 px-6 py-4 flex justify-between items-center border-b border-gray-800">
+                        <h3 className="text-lg font-bold text-white flex items-center">
+                            <Users className="w-5 h-5 mr-2 text-blue-400" />
+                            切换当前账户
+                        </h3>
+                        <button onClick={() => setIsUserSwitchModalOpen(false)} className="text-gray-400 hover:text-white transition-colors hover:bg-gray-800 p-1 rounded-lg">
+                            <X className="w-6 h-6" />
+                        </button>
+                    </div>
+                    <div className="p-4 max-h-[400px] overflow-y-auto custom-scrollbar bg-gray-50">
+                        <p className="text-xs text-gray-500 mb-3 px-2">请选择要模拟登录的系统用户：</p>
+                        <div className="space-y-2">
+                            {users.map(u => (
+                                <button 
+                                    key={u.id} 
+                                    onClick={() => { setCurrentUser(u); setIsUserSwitchModalOpen(false); }} 
+                                    className={`w-full text-left px-4 py-3 rounded-xl flex items-center justify-between border transition-all ${
+                                        currentUser.id === u.id 
+                                        ? 'bg-blue-50 border-blue-200 shadow-sm ring-1 ring-blue-200' 
+                                        : 'bg-white border-gray-200 hover:border-blue-300 hover:bg-blue-50/50'
+                                    }`}
+                                >
+                                    <div className="flex items-center space-x-3">
+                                        <img src={u.avatarUrl} alt={u.name} className="w-10 h-10 rounded-full bg-gray-200 object-cover" />
+                                        <div>
+                                            <p className={`font-bold text-sm ${currentUser.id === u.id ? 'text-blue-900' : 'text-gray-800'}`}>{u.name}</p>
+                                            <p className="text-xs text-gray-500 mt-0.5">{getRoleLabel(u.role)}</p>
+                                        </div>
+                                    </div>
+                                    {currentUser.id === u.id && <Check className="w-5 h-5 text-blue-600" />}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="p-4 border-t border-gray-200 bg-white">
+                        <button onClick={() => setIsUserSwitchModalOpen(false)} className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors">
+                            取消
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
       </div>
   );
 };
