@@ -1,17 +1,18 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Visit, Client, CustomFieldDefinition, StorageSettings, Attachment, AIAnalysisResult, CustomFieldData, VisitCategory, AIModelProvider } from '../types';
+import { Visit, Client, CustomFieldDefinition, StorageSettings, Attachment, AIAnalysisResult, CustomFieldData, VisitCategory, AIModelProvider, User } from '../types';
 import { analyzeVisitNotes, analyzeVisitAudio } from '../services/geminiService';
 import { startLiveTranscription, stopLiveTranscription, isSpeechRecognitionSupported } from '../services/webSpeechService';
 import { 
   Mic, Square, Play, Pause, Paperclip, X, Loader2, Sparkles, 
-  Calendar, User, AlertCircle, Save, Trash2, ChevronLeft, 
+  Calendar, User as UserIcon, AlertCircle, Save, Trash2, ChevronLeft, 
   Clock, FileText, ImageIcon, Headphones, MoreHorizontal, Plus, Briefcase, Settings, Check, Key
 } from 'lucide-react';
 
 interface VisitManagerProps {
   clients: Client[];
   visits: Visit[];
+  users?: User[]; // Optional for backward compatibility, but needed for displaying names
   onAddVisit: (visit: Visit) => void;
   onUpdateVisit: (visit: Visit) => void;
   onDeleteVisit: (id: string) => void;
@@ -25,7 +26,7 @@ interface VisitManagerProps {
 }
 
 const VisitManager: React.FC<VisitManagerProps> = ({
-  clients, visits, onAddVisit, onUpdateVisit, onDeleteVisit, 
+  clients, visits, users = [], onAddVisit, onUpdateVisit, onDeleteVisit, 
   fieldDefinitions, initialEditingVisitId, onClearInitialEditingVisitId,
   currentUserId, storageSettings, onUpdateStorageSettings
 }) => {
@@ -418,28 +419,43 @@ const VisitManager: React.FC<VisitManagerProps> = ({
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-4 pr-1 custom-scrollbar">
-                  {filteredVisits.map(visit => (
-                      <div key={visit.id} onClick={() => handleEditVisit(visit.id)} className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group">
-                          <div className="flex justify-between items-start mb-2">
-                              <div>
-                                  <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-600 transition-colors">{visit.clientName}</h3>
-                                  <div className="flex items-center space-x-3 text-xs text-gray-500 mt-1">
-                                      <span className="flex items-center"><Calendar className="w-3 h-3 mr-1" /> {new Date(visit.date).toLocaleDateString('zh-CN')}</span>
-                                      <span className="flex items-center"><User className="w-3 h-3 mr-1" /> {clients.find(c => c.id === visit.clientId)?.company || 'Unknown Company'}</span>
-                                      <span className={`px-1.5 py-0.5 rounded font-bold ${visit.category === 'Inbound' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{visit.category === 'Inbound' ? '来访' : '外出'}</span>
+                  {filteredVisits.map(visit => {
+                      const visitor = users.find(u => u.id === visit.userId);
+                      const client = clients.find(c => c.id === visit.clientId);
+                      return (
+                          <div key={visit.id} onClick={() => handleEditVisit(visit.id)} className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group">
+                              <div className="flex justify-between items-start mb-2">
+                                  <div className="flex-1">
+                                      <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-600 transition-colors">{visit.clientName}</h3>
+                                      {client && <div className="text-sm text-gray-500 font-medium mb-1">{client.company}</div>}
+                                      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 mt-1">
+                                          <span className="flex items-center" title={new Date(visit.date).toLocaleString('zh-CN')}>
+                                              <Calendar className="w-3 h-3 mr-1" /> 
+                                              {/* Ensure readable full date time if available, simplified logic */}
+                                              {visit.date.includes('T') 
+                                                ? new Date(visit.date).toLocaleString('zh-CN', {month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})
+                                                : visit.date
+                                              }
+                                          </span>
+                                          <span className="flex items-center text-gray-700 font-medium bg-gray-100 px-1.5 py-0.5 rounded">
+                                              <UserIcon className="w-3 h-3 mr-1" /> 
+                                              {visitor ? visitor.name : '未知用户'}
+                                          </span>
+                                          <span className={`px-1.5 py-0.5 rounded font-bold ${visit.category === 'Inbound' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{visit.category === 'Inbound' ? '来访' : '外出'}</span>
+                                      </div>
                                   </div>
+                                  <span className={`px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap ml-2 ${
+                                      visit.outcome === 'Positive' ? 'bg-green-100 text-green-700' : 
+                                      visit.outcome === 'Negative' ? 'bg-red-100 text-red-700' : 
+                                      'bg-gray-100 text-gray-600'
+                                  }`}>
+                                      {visit.outcome}
+                                  </span>
                               </div>
-                              <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                                  visit.outcome === 'Positive' ? 'bg-green-100 text-green-700' : 
-                                  visit.outcome === 'Negative' ? 'bg-red-100 text-red-700' : 
-                                  'bg-gray-100 text-gray-600'
-                              }`}>
-                                  {visit.outcome}
-                              </span>
+                              <p className="text-gray-600 text-sm line-clamp-2">{visit.summary}</p>
                           </div>
-                          <p className="text-gray-600 text-sm line-clamp-2">{visit.summary}</p>
-                      </div>
-                  ))}
+                      );
+                  })}
                   {filteredVisits.length === 0 && (
                       <div className="text-center py-12 text-gray-400">
                           暂无拜访记录
@@ -450,7 +466,7 @@ const VisitManager: React.FC<VisitManagerProps> = ({
       );
   }
 
-  // EDIT VIEW
+  // EDIT VIEW (unchanged mainly)
   return (
       <div className="h-full flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden relative">
           <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">

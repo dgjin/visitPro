@@ -1,18 +1,21 @@
+
 import React from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { Users, Calendar, TrendingUp, AlertCircle, ChevronRight, Briefcase, Award } from 'lucide-react';
-import { Visit, User } from '../types';
+import { Visit, User, Department, Client } from '../types';
 
 interface DashboardProps {
   visits: Visit[];
   users: User[];
+  departments: Department[];
+  clients: Client[];
   totalClients: number;
   onVisitClick: (visitId: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVisitClick }) => {
+const Dashboard: React.FC<DashboardProps> = ({ visits, users, departments, clients, totalClients, onVisitClick }) => {
   // Compute basic stats
   const totalVisits = visits.length;
   const positiveVisits = visits.filter(v => v.outcome === 'Positive').length;
@@ -49,6 +52,12 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVi
 
   const data = getWeeklyData();
 
+  const getDepartmentName = (idOrName: string) => {
+    if (!idOrName) return '未分配';
+    const dept = departments.find(d => d.id === idOrName);
+    return dept ? dept.name : idOrName;
+  };
+
   // Compute Team Stats
   const teamStats = users.map(user => {
       const userVisits = visits.filter(v => v.userId === user.id);
@@ -59,12 +68,17 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVi
         ? userVisits.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] 
         : null;
       
-      // Directly use the user object's fields
-      const teamDisplay = user.department ? `${user.department} / ${user.teamName || '无小组'}` : (user.teamName || '未分配');
+      const displayDept = getDepartmentName(user.department);
+
+      // Simple display logic for role
+      let displayRole = '成员';
+      if (user.role.includes('SystemAdmin')) displayRole = '管理员';
+      else if (user.role.includes('TeamLeader')) displayRole = '团队长';
 
       return {
           user,
-          teamDisplay,
+          displayDept,
+          displayRole,
           visitCount,
           successRate,
           lastVisit
@@ -152,7 +166,7 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVi
                     <thead>
                         <tr className="border-b border-gray-100 text-gray-400 uppercase tracking-wider">
                             <th className="pb-3 font-semibold pl-2">团队成员</th>
-                            <th className="pb-3 font-semibold">所属团队</th>
+                            <th className="pb-3 font-semibold">部门</th>
                             <th className="pb-3 font-semibold text-center">拜访总数</th>
                             <th className="pb-3 font-semibold text-center">积极转化</th>
                             <th className="pb-3 font-semibold text-right pr-2">最近活动</th>
@@ -165,11 +179,11 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVi
                                     <img src={stat.user.avatarUrl} alt={stat.user.name} className="w-7 h-7 rounded-full bg-gray-200" />
                                     <div>
                                         <p className="font-semibold text-gray-900">{stat.user.name}</p>
-                                        <p className="text-[10px] text-gray-400">{stat.user.role === 'Admin' ? '管理员' : '销售代表'}</p>
+                                        <p className="text-[10px] text-gray-400">{stat.displayRole}</p>
                                     </div>
                                 </td>
                                 <td className="py-3">
-                                    <span className="text-gray-600 font-medium truncate max-w-[120px] inline-block">{stat.teamDisplay}</span>
+                                    <span className="text-gray-600 font-medium truncate max-w-[120px] inline-block">{stat.displayDept}</span>
                                 </td>
                                 <td className="py-3 text-center">
                                     <span className="font-bold text-gray-700">{stat.visitCount}</span>
@@ -211,13 +225,18 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVi
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {visits.slice(0, 5).map((visit) => (
+              {visits.slice(0, 5).map((visit) => {
+                const client = clients.find(c => c.id === visit.clientId);
+                return (
                 <tr 
                     key={visit.id} 
                     className="hover:bg-blue-50/30 transition-colors cursor-pointer group"
                     onClick={() => onVisitClick(visit.id)}
                 >
-                  <td className="py-3 pl-1 font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{visit.clientName}</td>
+                  <td className="py-3 pl-1">
+                      <div className="font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{visit.clientName}</div>
+                      {client && <div className="text-xs text-gray-500 mt-0.5">{client.company}</div>}
+                  </td>
                   <td className="py-3 text-gray-500 tabular-nums">{new Date(visit.date).toLocaleDateString('zh-CN')}</td>
                   <td className="py-3 text-gray-500 max-w-xs truncate">{visit.summary}</td>
                   <td className="py-3">
@@ -232,7 +251,7 @@ const Dashboard: React.FC<DashboardProps> = ({ visits, users, totalClients, onVi
                       <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500 transition-all opacity-0 group-hover:opacity-100 transform group-hover:translate-x-1" />
                   </td>
                 </tr>
-              ))}
+              )})}
               {visits.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-gray-400 italic">暂无近期拜访记录。</td>

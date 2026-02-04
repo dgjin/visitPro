@@ -4,16 +4,26 @@ export interface CustomFieldData {
   value: string;
 }
 
+export type UserRole = 'SystemAdmin' | 'TeamLeader' | 'Member';
+
 export interface User {
   id: string;
   name: string;
   email: string;
   phone: string;
   department: string;
-  teamName: string;
-  role: 'Admin' | 'User';
+  role: UserRole[]; // Changed from single string to array
   avatarUrl: string;
   customFields?: CustomFieldData[];
+}
+
+export interface Department {
+  id: string;
+  name: string;
+  parentId: string | null;
+  managerId?: string;
+  description?: string;
+  children?: Department[]; // For UI tree structure
 }
 
 export interface CustomFieldDefinition {

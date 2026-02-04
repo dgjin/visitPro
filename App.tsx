@@ -5,8 +5,8 @@ import Dashboard from './components/Dashboard';
 import ClientManager from './components/ClientManager';
 import VisitManager from './components/VisitManager';
 import AdminPanel from './components/AdminPanel';
-import { Client, Visit, ViewState, User, CustomFieldDefinition, StorageSettings } from './types';
-import { initSupabase, fetchAllData, addClient, updateClient, deleteClient, addVisit, updateVisit, deleteVisit, addUser, updateUser, deleteUser, addField, deleteField } from './services/supabaseService';
+import { Client, Visit, ViewState, User, CustomFieldDefinition, StorageSettings, Department, UserRole } from './types';
+import { initSupabase, fetchAllData, addClient, updateClient, deleteClient, addVisit, updateVisit, deleteVisit, addUser, updateUser, deleteUser, addField, deleteField, addDepartment, updateDepartment, deleteDepartment } from './services/supabaseService';
 
 const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
   { id: 'f1', target: 'Client', label: '职位', type: 'text' },
@@ -18,8 +18,8 @@ const MOCK_FIELD_DEFINITIONS: CustomFieldDefinition[] = [
 ];
 
 const MOCK_USERS: User[] = [
-  { id: 'u1', name: 'John Doe', email: 'john@example.com', phone: '138-0013-8001', department: '销售部', teamName: '华东大区一组', role: 'Admin', avatarUrl: 'https://picsum.photos/seed/u1/200', customFields: [{ fieldId: 'f6', value: 'EMP001' }] },
-  { id: 'u2', name: 'Jane Smith', email: 'jane@example.com', phone: '139-1122-3344', department: '市场部', teamName: '内容运营组', role: 'User', avatarUrl: 'https://picsum.photos/seed/u2/200', customFields: [{ fieldId: 'f6', value: 'EMP002' }] },
+  { id: 'EMP-001', name: 'John Doe', email: 'john@example.com', phone: '138-0013-8001', department: '销售部', role: ['SystemAdmin', 'TeamLeader'], avatarUrl: 'https://picsum.photos/seed/u1/200', customFields: [] },
+  { id: 'EMP-002', name: 'Jane Smith', email: 'jane@example.com', phone: '139-1122-3344', department: '市场部', role: ['Member'], avatarUrl: 'https://picsum.photos/seed/u2/200', customFields: [] },
 ];
 
 const MOCK_CLIENTS: Client[] = [
@@ -28,8 +28,8 @@ const MOCK_CLIENTS: Client[] = [
 ];
 
 const MOCK_VISITS: Visit[] = [
-  { id: '101', userId: 'u1', clientId: '1', clientName: '艾丽斯·弗里曼', date: new Date(Date.now() - 86400000 * 2).toISOString(), category: 'Outbound', summary: '讨论了第三季度的路线图。客户对目前的进展感到满意，但要求增加一项新的报告功能。', rawNotes: '讨论Q3路线图。客户想要新报表功能。整体满意。', participants: 'CTO Alice, Sales John', outcome: 'Positive', actionItems: ['发送 API 文档', '安排技术评审'], sentimentScore: 85, customFields: [{ fieldId: 'f4', value: '60' }, { fieldId: 'f5', value: '3' }], followUpEmailDraft: 'Subject: Q3 Roadmap...' },
-  { id: '102', userId: 'u2', clientId: '2', clientName: '鲍勃·史密斯', date: new Date(Date.now() - 86400000 * 5).toISOString(), category: 'Inbound', summary: '初步需求会议。客户预算低于预期。需要调整提案。', rawNotes: '预算太低。需调整。', participants: 'Bob Smith, Jane Smith', outcome: 'Neutral', actionItems: ['修改报价', '邮件跟进'], sentimentScore: 50, followUpEmailDraft: 'Subject: Revised Proposal...' },
+  { id: '101', userId: 'EMP-001', clientId: '1', clientName: '艾丽斯·弗里曼', date: new Date(Date.now() - 86400000 * 2).toISOString(), category: 'Outbound', summary: '讨论了第三季度的路线图。客户对目前的进展感到满意，但要求增加一项新的报告功能。', rawNotes: '讨论Q3路线图。客户想要新报表功能。整体满意。', participants: 'CTO Alice, Sales John', outcome: 'Positive', actionItems: ['发送 API 文档', '安排技术评审'], sentimentScore: 85, customFields: [{ fieldId: 'f4', value: '60' }, { fieldId: 'f5', value: '3' }], followUpEmailDraft: 'Subject: Q3 Roadmap...' },
+  { id: '102', userId: 'EMP-002', clientId: '2', clientName: '鲍勃·史密斯', date: new Date(Date.now() - 86400000 * 5).toISOString(), category: 'Inbound', summary: '初步需求会议。客户预算低于预期。需要调整提案。', rawNotes: '预算太低。需调整。', participants: 'Bob Smith, Jane Smith', outcome: 'Neutral', actionItems: ['修改报价', '邮件跟进'], sentimentScore: 50, followUpEmailDraft: 'Subject: Revised Proposal...' },
 ];
 
 const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
@@ -77,6 +77,7 @@ const App: React.FC = () => {
   const [clients, setClients] = useState<Client[]>(initialState?.clients || MOCK_CLIENTS);
   const [visits, setVisits] = useState<Visit[]>(initialState?.visits || MOCK_VISITS);
   const [fieldDefinitions, setFieldDefinitions] = useState<CustomFieldDefinition[]>(initialState?.fieldDefinitions || MOCK_FIELD_DEFINITIONS);
+  const [departments, setDepartments] = useState<Department[]>(initialState?.departments || []);
   const [storageSettings, setStorageSettings] = useState<StorageSettings>(initialState?.storageSettings || DEFAULT_STORAGE_SETTINGS);
   const [currentUser, setCurrentUser] = useState<User>(users[0]);
   const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
@@ -95,6 +96,7 @@ const App: React.FC = () => {
                   setClients(data.clients);
                   setVisits(data.visits);
                   setFieldDefinitions(data.fieldDefinitions);
+                  setDepartments(data.departments);
               }
           }).catch(err => {
               console.error("Auto fetch failed:", err);
@@ -105,12 +107,12 @@ const App: React.FC = () => {
 
   // Persist to local storage (acts as cache or offline store)
   useEffect(() => {
-    const dataToSave = { users, clients, visits, fieldDefinitions, storageSettings };
+    const dataToSave = { users, clients, visits, fieldDefinitions, departments, storageSettings };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-  }, [users, clients, visits, fieldDefinitions, storageSettings]);
+  }, [users, clients, visits, fieldDefinitions, departments, storageSettings]);
 
   const handleBackupData = () => {
-      const data = { metadata: { version: '1.2', exportDate: new Date().toISOString() }, users, clients, visits, fieldDefinitions, storageSettings: { ...storageSettings, lastBackupDate: new Date().toISOString() } };
+      const data = { metadata: { version: '1.2', exportDate: new Date().toISOString() }, users, clients, visits, fieldDefinitions, departments, storageSettings: { ...storageSettings, lastBackupDate: new Date().toISOString() } };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -133,6 +135,7 @@ const App: React.FC = () => {
                   setClients(data.clients);
                   setVisits(data.visits);
                   setFieldDefinitions(data.fieldDefinitions || MOCK_FIELD_DEFINITIONS);
+                  setDepartments(data.departments || []);
                   setStorageSettings(data.storageSettings || DEFAULT_STORAGE_SETTINGS);
                   alert('数据恢复成功！');
               } else {
@@ -156,6 +159,7 @@ const App: React.FC = () => {
           setClients(data.clients);
           setVisits(data.visits);
           setFieldDefinitions(data.fieldDefinitions);
+          setDepartments(data.departments);
           setStorageSettings(prev => ({ ...prev, lastSyncDate: new Date().toISOString() }));
           alert('云端数据同步完成！');
       } catch (e: any) {
@@ -244,13 +248,13 @@ const App: React.FC = () => {
           });
       }
   };
-  const handleUpdateUserRole = async (id: string, role: 'Admin' | 'User') => { 
+  const handleUpdateUserRole = async (id: string, roles: UserRole[]) => { 
       const updated = users.find(u => u.id === id);
       if (updated) {
-          const newUser = { ...updated, role };
+          const newUser = { ...updated, role: roles };
           setUsers(prev => prev.map(u => u.id === id ? newUser : u));
           if (currentUser.id === id) setCurrentUser(newUser);
-          await safeExecute(updateUser(newUser)); // No rollback needed strictly for role change unless critical
+          await safeExecute(updateUser(newUser)); 
       }
   };
 
@@ -266,6 +270,29 @@ const App: React.FC = () => {
       await safeExecute(deleteField(id), () => {
           if (original) setFieldDefinitions(prev => [...prev, original]);
       });
+  };
+
+  const handleAddDepartment = async (dept: Department) => {
+      setDepartments(prev => [...prev, dept]);
+      await safeExecute(addDepartment(dept), () => {
+          setDepartments(prev => prev.filter(d => d.id !== dept.id));
+      });
+  };
+  const handleUpdateDepartment = async (dept: Department) => {
+      const original = departments.find(d => d.id === dept.id);
+      setDepartments(prev => prev.map(d => d.id === dept.id ? dept : d));
+      await safeExecute(updateDepartment(dept), () => {
+          if (original) setDepartments(prev => prev.map(d => d.id === dept.id ? original : d));
+      });
+  };
+  const handleDeleteDepartment = async (id: string) => {
+      const original = departments.find(d => d.id === id);
+      if (confirm('确定要删除此部门吗？')) {
+          setDepartments(prev => prev.filter(d => d.id !== id));
+          await safeExecute(deleteDepartment(id), () => {
+              if (original) setDepartments(prev => [...prev, original]);
+          });
+      }
   };
 
   const NavItem = ({ viewTarget, label, icon: Icon }: { viewTarget: ViewState, label: string, icon: any }) => (
@@ -287,7 +314,7 @@ const App: React.FC = () => {
               <NavItem viewTarget={ViewState.DASHBOARD} label="仪表盘" icon={LayoutDashboard} />
               <NavItem viewTarget={ViewState.CLIENTS} label="客户列表" icon={Users} />
               <NavItem viewTarget={ViewState.VISITS} label="拜访管理" icon={CalendarCheck} />
-              {currentUser.role === 'Admin' && (
+              {currentUser.role.includes('SystemAdmin') && (
                  <div className="pt-4 mt-4 border-t border-gray-800">
                     <p className="px-4 text-xs font-semibold text-gray-500 uppercase mb-2">管理员</p>
                     <NavItem viewTarget={ViewState.ADMIN} label="系统管理" icon={Shield} />
@@ -300,11 +327,13 @@ const App: React.FC = () => {
                   <img src={currentUser.avatarUrl} alt="Profile" className="w-8 h-8 rounded-full bg-gray-700" />
                   <div className="text-sm">
                     <p className="text-white font-medium">{currentUser.name}</p>
-                    <p className="text-gray-500 text-xs">{currentUser.role === 'Admin' ? '系统管理员' : '销售代表'}</p>
+                    <p className="text-gray-500 text-xs">
+                        {currentUser.role.includes('SystemAdmin') ? '系统管理员' : currentUser.role.includes('TeamLeader') ? '团队长' : '成员'}
+                    </p>
                   </div>
                   <div className="absolute bottom-full left-0 w-full mb-2 bg-white rounded-lg shadow-lg p-2 hidden group-hover:block text-gray-800 z-50">
                       <p className="text-xs text-gray-500 mb-1 px-2">切换用户 (Demo)</p>
-                      {users.map(u => (<button key={u.id} onClick={() => setCurrentUser(u)} className={`w-full text-left px-2 py-1 text-sm rounded hover:bg-gray-100 ${currentUser.id === u.id ? 'font-bold text-blue-600' : ''}`}>{u.name} ({u.role})</button>))}
+                      {users.map(u => (<button key={u.id} onClick={() => setCurrentUser(u)} className={`w-full text-left px-2 py-1 text-sm rounded hover:bg-gray-100 ${currentUser.id === u.id ? 'font-bold text-blue-600' : ''}`}>{u.name} ({u.role.join(', ')})</button>))}
                   </div>
                </div>
             </div>
@@ -318,10 +347,10 @@ const App: React.FC = () => {
           </header>
           <main className="flex-1 overflow-y-auto p-4 lg:p-8">
             <div className="max-w-7xl mx-auto h-full">
-              {view === ViewState.DASHBOARD && <Dashboard visits={visits} users={users} totalClients={clients.length} onVisitClick={handleVisitClick} />}
+              {view === ViewState.DASHBOARD && <Dashboard visits={visits} users={users} departments={departments} clients={clients} totalClients={clients.length} onVisitClick={handleVisitClick} />}
               {view === ViewState.CLIENTS && <ClientManager clients={clients} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} fieldDefinitions={fieldDefinitions} />}
-              {view === ViewState.VISITS && <VisitManager clients={clients} visits={visits} onAddVisit={handleAddVisit} onUpdateVisit={handleUpdateVisit} onDeleteVisit={handleDeleteVisit} onUpdateClient={handleUpdateClient} fieldDefinitions={fieldDefinitions} initialEditingVisitId={selectedVisitId} onClearInitialEditingVisitId={() => setSelectedVisitId(null)} currentUserId={currentUser.id} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} />}
-              {view === ViewState.ADMIN && currentUser.role === 'Admin' && <AdminPanel users={users} clients={clients} visits={visits} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateUserRole={handleUpdateUserRole} fieldDefinitions={fieldDefinitions} onAddField={handleAddField} onDeleteField={handleDeleteField} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} onBackupData={handleBackupData} onRestoreData={handleRestoreData} onSyncSupabase={handleSyncSupabase} />}
+              {view === ViewState.VISITS && <VisitManager clients={clients} visits={visits} users={users} onAddVisit={handleAddVisit} onUpdateVisit={handleUpdateVisit} onDeleteVisit={handleDeleteVisit} onUpdateClient={handleUpdateClient} fieldDefinitions={fieldDefinitions} initialEditingVisitId={selectedVisitId} onClearInitialEditingVisitId={() => setSelectedVisitId(null)} currentUserId={currentUser.id} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} />}
+              {view === ViewState.ADMIN && currentUser.role.includes('SystemAdmin') && <AdminPanel users={users} clients={clients} visits={visits} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateUserRole={handleUpdateUserRole} fieldDefinitions={fieldDefinitions} onAddField={handleAddField} onDeleteField={handleDeleteField} storageSettings={storageSettings} onUpdateStorageSettings={setStorageSettings} onBackupData={handleBackupData} onRestoreData={handleRestoreData} onSyncSupabase={handleSyncSupabase} departments={departments} onAddDepartment={handleAddDepartment} onUpdateDepartment={handleUpdateDepartment} onDeleteDepartment={handleDeleteDepartment} />}
             </div>
           </main>
         </div>
